@@ -44,7 +44,7 @@
 
 //#COMMAND BROWSE => Browse( 1, 0, MaxRow() - 1, MaxCol() )
 
-#TRANSLATE _GET_( <var>, <!varname!>, [<pic>], [<valid>], [<when>] ) => __GET( MEMVARBLOCK(<varname>), <varname>, <pic>, <valid>, <when> )
+#TRANSLATE _GET_( <var>, <varname>, [<pic>], [<valid>], [<when>] ) => __GET( MEMVARBLOCK(<varname>), <varname>, <pic>, <valid>, <when> )
 #TRANSLATE __GET( <parlist,...>):Display() => __GET(<parlist>)
 
 //#COMMAND EXTERNAL <!file1!> [, <!fileN!> ] => PP_ProcessFile( <file1> ) [; PP_ProcessFile( <fileN> ) ]

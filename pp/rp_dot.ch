@@ -5,12 +5,8 @@
 #COMMAND BROWSE => Browse( 1, 0, MaxRow() - 1, MaxCol() )
 #COMMAND EXIT => __QUIT()
 
-#ifdef __HARBOUR__
-   #TRANSLATE _GET_( <var>, <varname>, <pic>, <valid>, <when> ) => __GET( <var>, <varname>, <pic>, <valid>, <when>, MEMVARBLOCK(<varname>) )
-#else
-   #TRANSLATE _GET_( <var>, <varname>, <pic>, <valid>, <when> ) => __GET( MEMVARBLOCK(<varname>), <varname>, <pic>, <valid>, <when> )
-   #TRANSLATE __GET( <parlist,...>):Display() => __GET(<parlist>)
-#endif
+#TRANSLATE _GET_( <var>, <varname>, [<pic>], [<valid>], [<when>] ) => __GET( MEMVARBLOCK(<varname>), <varname>, <pic>, <valid>, <when> )
+//#TRANSLATE __GET( <parlist,...>):Display() => __GET(<parlist>)
 
 #COMMAND IF <ifExp> => __SetIf( <ifExp> )
 #COMMAND ELSEIF <elseifExp> => __SetElseIf( <elseifExp> )

@@ -29,6 +29,14 @@
 #DEFINE PP_BUFFER_SIZE 8192 //16384
 
 #ifdef __HARBOUR__
+
+   // Enable extended syntax.
+   #ifdef __XHARBOUR__
+      #define __FOR_EACH__
+      #define __WITH_
+      #define __STRING_INDEX__
+   #endif
+
    #ifndef NO_BOOST
       #define USE_C_BOOST
    #endif
@@ -38,13 +46,142 @@
    #ifdef FW
       #INCLUDE "fwextern.ch"
    #else
+      #ifdef MINIGUI
+         #define WIN
+
+         EXTERN PLAYBEEP
+         EXTERN PLAYASTERISK
+         EXTERN PLAYEXCLAMATION
+         EXTERN PLAYHAND
+         EXTERN PLAYQUESTION
+         EXTERN PLAYOK
+         EXTERN ACTIVATEFORM
+         EXTERN GETFONT
+         EXTERN GETFILE
+         EXTERN PUTFILE
+         EXTERN GETMENU
+         EXTERN GETSUBMENU
+         EXTERN CCHECKMENUITEM
+         EXTERN CUNCHECKMENUITEM
+         EXTERN GETMENUCHECKSTATE
+         EXTERN CENABLEMENUITEM
+         EXTERN CDISABLEMENUITEM
+         EXTERN GETMENUENABLEDSTATE
+         EXTERN INITTIMER
+         EXTERN KILLTIMER
+         EXTERN INITTOOLTIP
+         EXTERN SETTOOLTIP
+         EXTERN INITPANEL
+         EXTERN C_MSGRETRYCANCEL
+         EXTERN C_MSGOKCANCEL
+         EXTERN C_MSGYESNO
+         EXTERN INITPROGRESSBAR
+         EXTERN INITSLIDER
+         EXTERN REPAINTSTATUS
+         EXTERN INITDATEPICK
+         EXTERN SETDATEPICK
+         EXTERN GETDATEPICKYEAR
+         EXTERN GETDATEPICKMONTH
+         EXTERN GETDATEPICKDAY
+         EXTERN EXITPROCESS
+         EXTERN LISTVIEW_GETFIRSTITEM
+         EXTERN INITGUI
+         EXTERN INITTOPMOSTFORM
+         EXTERN TRACKPOPUPMENU
+         EXTERN INITSTATUS
+         EXTERN SETSTATUS
+         EXTERN INITFORM
+         EXTERN INITMODALWINDOW
+         EXTERN ACTIVATEFORMGENERIC
+         EXTERN ACTIVATEFORMNOWAIT
+         EXTERN CSHOWCONTROL
+         EXTERN MAXIMIZE
+         EXTERN MINIMIZE
+         EXTERN RESTORE
+         EXTERN CHIDECONTROL
+         EXTERN INITBUTTON
+         EXTERN INITIMAGEBUTTON
+         EXTERN INITLABEL
+         EXTERN INITCHECKBOX
+         EXTERN INITGROUPBOX
+         EXTERN INITRADIOGROUP
+         EXTERN INITRADIOBUTTON
+         EXTERN INITCOMBOBOX
+         EXTERN INITLISTBOX
+         EXTERN INITSPINNER
+         EXTERN INITTEXTBOX
+         EXTERN INITNUMERICTEXTBOX
+         EXTERN INITPASSWORDTEXTBOX
+         EXTERN INITEDITBOX
+         EXTERN INITREADONLYEDITBOX
+         EXTERN GETACTIVEWINDOW
+         EXTERN SETACTIVEWINDOW
+         EXTERN INITLISTVIEW
+         EXTERN MSGBOX
+         EXTERN POSTQUITMESSAGE
+         EXTERN INITLISTVIEWCOLUMNS
+         EXTERN ADDLISTVIEWITEMS
+         EXTERN INITTABCONTROL
+         EXTERN TABCTRL_SETCURSEL
+         EXTERN TABCTRL_GETCURSEL
+         EXTERN INITIMAGE
+         EXTERN HIWORD
+         EXTERN LOWORD
+         EXTERN DESTROYWINDOW
+         EXTERN MSGINFO
+         EXTERN MSGSTOP
+         EXTERN MSGEXCLAMATION
+         EXTERN INITMENU
+         EXTERN INITCONTEXTMENU
+         EXTERN ISWINDOWENABLED
+         EXTERN ENABLEWINDOW
+         EXTERN DISABLEWINDOW
+         EXTERN SETFOREGROUNDWINDOW
+         EXTERN GETFOREGROUNDWINDOW
+         EXTERN GETNEXTWINDOW
+         EXTERN GETPREVWINDOW
+         EXTERN CHECKDLGBUTTON
+         EXTERN UNCHECKDLGBUTTON
+         EXTERN COMBOADDSTRING
+         EXTERN COMBOSETCURSEL
+         EXTERN LISTBOXADDSTRING
+         EXTERN LISTBOXSETCURSEL
+         EXTERN SETDLGITEMTEXT
+         EXTERN SETWINDOWTEXT
+         EXTERN CENTER
+         EXTERN LISTVIEW_SETCURSEL
+         EXTERN C_SETFOCUS
+         EXTERN GETDLGITEMTEXT
+         EXTERN GETWINDOWTEXT
+         EXTERN ISDLGBUTTONCHECKED
+         EXTERN COMBOGETCURSEL
+         EXTERN LISTBOXGETCURSEL
+         EXTERN COMBOBOXDELETESTRING
+         EXTERN LISTBOXDELETESTRING
+         EXTERN LISTVIEWDELETESTRING
+         EXTERN LISTBOXRESET
+         EXTERN LISTVIEWRESET
+         EXTERN COMBOBOXRESET
+         EXTERN SENDMESSAGE
+         EXTERN C_GETFOLDER
+         EXTERN C_BROWSEFORFOLDER
+         EXTERN C_GETSPECIALFOLDER
+      #endif
+
       #ifdef WIN
          #COMMAND Alert( <x> ) => MessageBox( 0, CStr( <x> ), "PP for Windows", 0 )
          EXTERN MessageBox
+         EXTERN CreateObject
       #endif
+
+
    #endif
+
 #else
+
    #DEFINE __CLIPPER__
+
+   #translate At( <find>, <where>, <from> ) => IIF( ( M->__AT__  := At( <find>, SubStr( <where>, <from> ) ) ) == 0, 0, M->__AT__ )
 
    #ifndef CRLF
       #DEFINE  CRLF Chr(13) + Chr(10)
@@ -205,7 +342,7 @@ STATIC s_acFlowType := {},  s_nFlowId := 0
    STATIC s_bRecursive := .F.
 #endif
 
-static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F.
+static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUILoaded := .F.
 
 //--------------------------------------------------------------//
 #ifdef __HARBOUR__
@@ -314,18 +451,6 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F.
          bCCH := .T.
       ENDIF
 
-      /* Process command line defines. */
-      WHILE ( nAt := At( "-D", sSwitch ) ) > 0
-         nNext := At( "-", SubStr( sSwitch, nAt + 2 ) )
-         IF nNext == 0
-            nNext := 256
-         ENDIF
-
-         sDefine := SubStr( sSwitch, nAt + 2, nNext - 1 )
-         sSwitch := Left( sSwitch, nAt - 1 ) + SubStr( sSwitch, nAt + 1 + nNext )
-         CompileDefine( sDefine )
-      ENDDO
-
       /* Debug tracing options. */
       IF "-D:E" $ sSwitch
          bDbgExp := .T.
@@ -340,13 +465,25 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F.
          sSwitch := StrTran( sSwitch, "-D:P", "" )
       ENDIF
 
+      /* Process command line defines. */
+      WHILE ( nAt := At( "-D", sSwitch ) ) > 0
+         nNext := At( "-", SubStr( sSwitch, nAt + 2 ) )
+         IF nNext == 0
+            nNext := 256
+         ENDIF
+
+         sDefine := SubStr( sSwitch, nAt + 2, nNext - 1 )
+         sSwitch := Left( sSwitch, nAt - 1 ) + SubStr( sSwitch, nAt + 1 + nNext )
+         CompileDefine( sDefine )
+      ENDDO
+
       /* Process command line include paths. */
       IF ( nAt := At( "-I", sSwitch ) ) > 0
          nNext := At( "-", SubStr( sSwitch, nAt + 2 ) )
          IF nNext == 0
             nNext := 256
          ENDIF
-         sIncludePath := SubStr( sSwitch, nAt + 2, nNext )
+         sIncludePath := SubStr( sSwitch, nAt + 2, nNext - 1 )
 
          WHILE ( nNext := At( ';', sIncludePath ) ) > 0
             sPath := Left( sIncludePath, nNext - 1 )
@@ -584,13 +721,8 @@ FUNCTION PP_ExecProcedure( aProc, sProcName )
       aAdd( s_aProcStack[s_nProcStack], Array( nVars, 2 ) )
       FOR nVar := 1 TO nVars
          s_aProcStack[s_nProcStack][4][nVar][1] := s_asLocals[nVar]
-         #ifdef __HARBOUR__
-            s_aProcStack[s_nProcStack][4][nVar][2] := __MVGET( s_asLocals[nVar] )
-            __MVPUT( s_asLocals[nVar], NIL ) // *** Harbour __MXRelease() not working !!!
-         #else
-            s_aProcStack[s_nProcStack][4][nVar][2] := &( s_asLocals[nVar] )
-            __MXRelease( s_asLocals[nVar] )
-         #endif
+         s_aProcStack[s_nProcStack][4][nVar][2] := &( s_asLocals[nVar] )
+         __MXRelease( s_asLocals[nVar] )
          //Alert( [Released upper local: ] + s_asLocals[nVar] + [ in ] + s_aProcStack[s_nProcStack][1] )
       NEXT
       aSize( s_asLocals, 0 )
@@ -609,19 +741,24 @@ FUNCTION PP_ExecProcedure( aProc, sProcName )
 
          BEGIN SEQUENCE
 
+            //TraceLog( "Line: " + Str( aProc[2][nBlock][3], 3 ) )
+
             IF aProc[2][nBlock][1] == 0
                //? aProc[2][nBlock][3]
                Eval( aProc[2][nBlock][2] )
             ELSE
                IF ! Eval( aProc[2][nBlock][2] ) // Jump if FALSE.
                   nBlock := aProc[2][nBlock][1]
+                  //TraceLog( "Jump: " + Str( aProc[2][nBlock][3], 3 ) )
                ENDIF
             ENDIF
 
          RECOVER USING xErr
-            //IF ValType( xErr ) == 'N'
-            //   PP_ExecProcedure( s_aProcedures[xErr] )
-            //ENDIF
+            IF ValType( xErr ) == 'L'
+               //TraceLog( "Return" )
+               // Return from this procedure requested by PP_SetReturn()
+               EXIT
+            ENDIF
          END SEQUENCE
       ENDIF
    NEXT
@@ -629,11 +766,7 @@ FUNCTION PP_ExecProcedure( aProc, sProcName )
    /* Releasing Privates created by the Procedure */
    nVars := Len( s_asPrivates )
    FOR nVar := 1 TO nVars
-      #ifdef __HARBOUR__
-         __MVPUT( s_asPrivates[nVar], NIL )
-      #else
-         __MXRelease( s_asPrivates[nVar] )
-      #endif
+      __MXRelease( s_asPrivates[nVar] )
       //Alert( [Released private: ] + s_asPrivates[nVar] + [ in ] + s_aProcStack[s_nProcStack][1] )
    NEXT
    aSize( s_asPrivates, 0 )
@@ -641,11 +774,7 @@ FUNCTION PP_ExecProcedure( aProc, sProcName )
    /* Releasing Locals created by the Procedure */
    nVars := Len( s_asLocals )
    FOR nVar := 1 TO nVars
-      #ifdef __HARBOUR__
-         __MVPUT( s_asLocals[nVar], NIL )
-      #else
-         __MXRelease( s_asLocals[nVar] )
-      #endif
+      __MXRelease( s_asLocals[nVar] )
       //Alert( [Released local: ] + s_asLocals[nVar] + [ in ] + s_aProcStack[s_nProcStack][1] )
    NEXT
    aSize( s_asLocals, 0 )
@@ -659,7 +788,7 @@ FUNCTION PP_ExecProcedure( aProc, sProcName )
       FOR nVar := 1 TO nVars
          aAdd( s_asPrivates, s_aProcStack[s_nProcStack][3][nVar][1] )
          #ifdef __HARBOUR__
-            //__QQPub( s_aProcStack[s_nProcStack][3][nVar][1] ) // *** Harbour Var was never released because of bug in __MXRelease() !!!
+            __QQPub( s_aProcStack[s_nProcStack][3][nVar][1] )
             __MVPUT( s_aProcStack[s_nProcStack][3][nVar][1], s_aProcStack[s_nProcStack][3][nVar][2] )
          #else
             __QQPub( s_aProcStack[s_nProcStack][3][nVar][1] )
@@ -672,7 +801,7 @@ FUNCTION PP_ExecProcedure( aProc, sProcName )
       FOR nVar := 1 TO nVars
          aAdd( s_asLocals, s_aProcStack[s_nProcStack][4][nVar][1] )
          #ifdef __HARBOUR__
-            //__QQPub( s_aProcStack[s_nProcStack][4][nVar][1] ) // *** Harbour Var was never released because of bug in __MXRelease() !!!
+            __QQPub( s_aProcStack[s_nProcStack][4][nVar][1] )
             __MVPUT( s_aProcStack[s_nProcStack][4][nVar][1], s_aProcStack[s_nProcStack][4][nVar][2] )
          #else
             __QQPub( s_aProcStack[s_nProcStack][4][nVar][1] )
@@ -692,9 +821,9 @@ PROCEDURE RP_Dot()
    LOCAL GetList := {}, sLine := Space(256)
    LOCAL nDefines, nCommands, nTranslates
 
-   LOCAL aCopyDefRules, aCopyDefResults
-   LOCAL aCopyCommRules, aCopyCommResults
-   LOCAL aCopyTransRules, aCopyTransResults
+   LOCAL aCpyDefRules, aCpyDefResults
+   LOCAL aCpyCommRules, aCpyCommResults
+   LOCAL aCpyTranRules, aCpyTranResults
 
    #ifdef FW
        Alert( [DOT mode (no filename parameter) is Not ready for GUI yet.] + CRLF + CRLF + [Please try Interpreter mode, using the -R switch...] )
@@ -708,14 +837,14 @@ PROCEDURE RP_Dot()
       PP_PreProLine( '#COMMAND Alert( <x> ) => MessageBox( 0, CStr( <x> ), "TInterpreter for Windows", 0 )' )
    #endif
 
-   aCopyDefRules     := aClone( aDefRules )
-   aCopyDefResults   := aClone( aDefResults )
+   aCpyDefRules     := aClone( aDefRules )
+   aCpyDefResults   := aClone( aDefResults )
 
-   aCopyCommRules    := aClone( aCommRules )
-   aCopyCommResults  := aClone( aCommResults )
+   aCpyCommRules    := aClone( aCommRules )
+   aCpyCommResults  := aClone( aCommResults )
 
-   aCopyTransRules   := aClone( aTransRules )
-   aCopyTransResults := aClone( aTransResults )
+   aCpyTranRules   := aClone( aTransRules )
+   aCpyTranResults := aClone( aTransResults )
 
    ErrorBlock( {|oErr| RP_Dot_Err( oErr ) } )
 
@@ -731,21 +860,21 @@ PROCEDURE RP_Dot()
       SET CURSOR ON
       READ
 
-      sLine := StrTran( sLine,  Chr(9), "  " )
+      sLine := StrTran( sLine,  Chr(9), " " )
 
       ExecuteLine( PP_PreProLine( RTrim( sLine ), 1, '' ) )
 
       //TraceLog( Len( aDefRules ), Len( aCommRules ), Len( aTransRules ) )
 
       IF s_lRunLoaded
-         aDefRules     := aClone( aCopyDefRules )
-         aDefResults   := aClone( aCopyDefResults )
+         aDefRules     := aClone( aCpyDefRules )
+         aDefResults   := aClone( aCpyDefResults )
 
-         aCommRules    := aClone( aCopyCommRules )
-         aCommResults  := aClone( aCopyCommResults )
+         aCommRules    := aClone( aCpyCommRules )
+         aCommResults  := aClone( aCpyCommResults )
 
-         aTransRules   := aClone( aCopyTransRules )
-         aTransResults := aClone( aCopyTransResults )
+         aTransRules   := aClone( aCpyTranRules )
+         aTransResults := aClone( aCpyTranResults )
 
          s_lRunLoaded := .F.
          s_lClsLoaded := .F.
@@ -913,6 +1042,8 @@ FUNCTION PP_CompileLine( sPPed, nLine, aProcedures, aInitExit, nProcId )
    ExtractLeadingWS( @sPPed )
    DropTrailingWS( @sPPed )
 
+   //TraceLog( sPPed, nLine )
+
    BEGIN SEQUENCE
 
       IF sPPed = "_HB_CLASS"
@@ -929,7 +1060,7 @@ FUNCTION PP_CompileLine( sPPed, nLine, aProcedures, aInitExit, nProcId )
          ExtractLeadingWS( @sBlock )
          DropTrailingWS( @sBlock )
 
-         IF ! ( sBlock == '' )
+         IF ! Empty( sBlock )
             IF sBlock = "#line"
                LOOP
             ENDIF
@@ -1582,7 +1713,7 @@ FUNCTION PP_CompileLine( sPPed, nLine, aProcedures, aInitExit, nProcId )
                aAdd( aProcedures[ nProcId ][2], { 0, NIL, nLine } )
             ELSE
                //? nLine, nProcId, sBlock
-               //TraceLog( sBlock )
+               //TraceLog( nLine, nProcId, sBlock )
                aAdd( aProcedures[ nProcId ][2], { 0, &( "{||" + sBlock + "}" ), nLine } )
             ENDIF
          ENDIF
@@ -1831,6 +1962,10 @@ PROCEDURE PP_SetReturn( xRet )
 
    s_xRet := xRet
 
+   //TraceLog( xRet )
+
+   BREAK .T.
+
 RETURN
 
 //--------------------------------------------------------------//
@@ -1942,6 +2077,8 @@ PROCEDURE RP_Comp_Err( oErr, sLine, nLine )
 
    LOCAL Counter, xArg, sArgs := ""
 
+   ErrorBlock( {|e| TraceLog( e:Description, e:SubSystem, e:SubCode, e:Args ), __Quit() } )
+
    IF ValType( oErr:Args ) == 'A'
       sArgs := "Arguments: "
 
@@ -1990,9 +2127,13 @@ PROCEDURE RP_Comp_Err( oErr, sLine, nLine )
 
 //--------------------------------------------------------------//
 
-FUNCTION RP_Run_Err( oErr, aProcedures )
+FUNCTION RP_Run_Err( oErr, aProcedures, nLine )
 
    LOCAL Counter, xArg, sArgs := "", nProc, sProc
+
+   IF nLine == NIL
+      nLine := 0
+   ENDIF
 
    IF ValType( oErr:Args ) == 'A'
       sArgs := "Arguments: "
@@ -2054,6 +2195,7 @@ FUNCTION RP_Run_Err( oErr, aProcedures )
          ENDIF
 
          PP_ExecProcedure( aProcedures[nProc] )
+
          IF oErr:CanSubstitute
             RETURN ( s_xRet )
          ELSEIF oErr:CanDefault
@@ -2061,25 +2203,30 @@ FUNCTION RP_Run_Err( oErr, aProcedures )
 						       sArgs + CRLF + ;
 									 PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + CRLF + ;
 									 ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
+
             RETURN  ( .F. )
          ELSE
             Alert( [No Recovery for: ] + "'" + oErr:Operation + "' " + oErr:Description + CRLF + ;
 						       sArgs + " " + CRLF + ;
 									 PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + CRLF + ;
 									 ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
-            BREAK nProc
+
+            oErr:Cargo := nProc
+            BREAK oErr
          ENDIF
       ENDIF
    ENDIF
 
-   TraceLog( s_sModule, "Sorry, R/T Error: [" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) +  "] '" + oErr:Operation + "' '" + oErr:Description + "' " + sArgs + " " + PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
-   Alert( [R/T Error: ] + "[" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) + "] '" + oErr:Operation + "' " + CRLF + ;
+   TraceLog( s_sModule, nLine, "Sorry, R/T Error: [" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) +  "] '" + oErr:Operation + "' '" + oErr:Description + "' " + sArgs + " " + PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
+
+   Alert( [Line: ] + Str( nLine ) + [ R/T Error: ] + "[" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) + "] '" + oErr:Operation + "' " + CRLF + ;
 	        oErr:Description + CRLF + ;
 					sArgs + CRLF + ;
 					PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + CRLF + ;
 					ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
 
-   BREAK oErr
+   //BREAK oErr
+   __Quit()
 
 RETURN NIL // Unreacable code
 
@@ -2302,11 +2449,11 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
 
    s_sFile := sSource
 
-   hSource := FOpen( sSource, 0 )
+   hSource := FOpen( sSource, 64 )
    IF hSource == -1
       nPath := 1
       WHILE hSource == -1 .AND. nPath <= nPaths
-          hSource := FOpen( s_asPaths[nPath] + sSource, 0 )
+          hSource := FOpen( s_asPaths[nPath] + sSource, 64 )
           nPath++
       ENDDO
    ENDIF
@@ -2327,7 +2474,8 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
       ENDIF
 
       IF sPPOExt == NIL
-         hPP := 0
+         // *** Intentionally invalid handle - saves us from performing an IF on each of the FWrite( hPP, ... )
+         hPP := -1
       ELSE
          sExt := SubStr( sSource, RAt( '.', sSource ) )
          IF ! ( sExt == '' )
@@ -2957,9 +3105,9 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
             DropTrailingWS( @sLine )
 
             // Strip the ""
-            sLine := SubStr( sLine, 2, Len( sLine ) - 2 )
+            sLine := Upper( SubStr( sLine, 2, Len( sLine ) - 2 ) )
 
-            IF Upper( sLine ) = "HBCLASS"
+            IF sLine == "HBCLASS.CH"
                IF ! s_lClsLoaded
                   s_lClsLoaded := .T.
                   InitClsRules()
@@ -2974,7 +3122,8 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                      Alert( [Class #DEFINE Rules size mismatch] )
                   ENDIF
                ENDIF
-            ELSEIF Upper( sLine ) = "FIVEWIN"
+          #ifdef __HARBOUR__ 
+            ELSEIF sLine == "FIVEWIN.CH"
                IF ! s_lFWLoaded
                   s_lFWLoaded := .T.
                   IF ! s_lClsLoaded
@@ -3003,6 +3152,36 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                      Alert( [FW #DEFINE Rules size mismatch] )
                   ENDIF
                ENDIF
+            ELSEIF sLine == "MINIGUI.CH"
+               IF ! s_lMiniGUILoaded
+                  s_lMiniGUILoaded := .T.
+                  IF ! s_lClsLoaded
+                     s_lClsLoaded := .T.
+                     InitClsRules()
+                     InitClsResults()
+                     IF Len( aDefRules ) != Len( aDefResults )
+                        Alert( [Class #DEFINE Rules size mismatch] )
+                     ENDIF
+                     IF Len( aTransRules ) != Len( aTransResults )
+                        Alert( [Class #TRANSLATE Rules size mismatch] )
+                     ENDIF
+                     IF Len( aCommRules ) != Len( aCommResults )
+                        Alert( [Class #DEFINE Rules size mismatch] )
+                     ENDIF
+                  ENDIF
+                  InitMiniGUIRules()
+                  InitMiniGUIResults()
+                  IF Len( aDefRules ) != Len( aDefResults )
+                     Alert( [MiniGUI #DEFINE Rules size mismatch] )
+                  ENDIF
+                  IF Len( aTransRules ) != Len( aTransResults )
+                     Alert( [MiniGUI #TRANSLATE Rules size mismatch] )
+                  ENDIF
+                  IF Len( aCommRules ) != Len( aCommResults )
+                     Alert( [MiniGUI #DEFINE Rules size mismatch] )
+                  ENDIF
+               ENDIF
+          #endif
             ELSE
                PP_PreProFile( sLine ) // Intentionally not using s_sIncludeFile
 
@@ -3292,6 +3471,7 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
    LOCAL nSpaceAt, sStopLine, sNextStopper, nTemp
    LOCAL bRepeatableMatched
    LOCAL aaRevertMarkers := {}
+   LOCAL nBackup, nLevel, bTestDependant
 
    nRules   := Len( aRules )
 
@@ -3421,11 +3601,11 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
 
                IF aMP[2] > 0 .AND. nMatch < nMatches
                   /* Skip all same level optionals to next group. */
-                  nOptional := aMP[2]
+                  nOptional := Abs( aMP[2] )
                   nMatch++
                   WHILE nMatch <= nMatches
                      aMP := aRules[nRule][2][nMatch]
-                     IF ( aMP[2] >= 0 ) .AND. ( aMP[2] <= Abs( nOptional ) )
+                     IF ( aMP[2] >= 0 ) .AND. ( aMP[2] <= nOptional )
                         EXIT
                      ENDIF
                      nMatch++
@@ -3520,23 +3700,18 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                   sWorkLine := sStopLine
 
                   /* Current level */
-                  nOptional := aMP[2]
-                  IF nOptional < 0
-                     nOptional := Abs( nOptional )
-                  ENDIF
+                  nOptional := Abs( aMP[2] )
 
                   /* Commented out 07-21-2001 Seems unneeded. */
                   #ifdef WHY_REWIND
                       /* Rewind to beging of same level and then search for the stopper match */
                       WHILE nMatch > 1
                          nMatch--
-                         IF aRules[nRule][2][nMatch][2] >= 0 .AND. aRules[nRule][2][nMatch][2] < nOPtional
+                         IF Abs( aRules[nRule][2][nMatch][2] ) < nOPtional
                             EXIT
                          ENDIF
                       ENDDO
-                      IF aRules[nRule][2][nMatch][2] >= 0 .AND. aRules[nRule][2][nMatch][2] < nOPtional
-                         nMatch++
-                      ENDIF
+                      nMatch++
                   #endif
 
                   /* Now search for the stopper. */
@@ -3694,6 +3869,97 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                ENDIF
             ENDIF
 
+            // *** This complete IF section added 2002-May-11, the bug this solved might be fixed otherwise ***
+            // EOL - Rule will match if rest is OPTIONAL.
+            IF Empty( sWorkLine )
+               IF bDbgMatch
+                  ? "End of Input."
+               ENDIF
+
+               // Remainder may be optional.
+               nBackup := nMatch
+               bTestDependant := .T.
+               nTemp := Abs( aMP[2] )
+               WHILE ++nMatch <= nMatches
+                  nLevel := aRules[nRule][2][nMatch][2]
+
+                  // Non Optional.
+                  IF nLevel == 0
+                     EXIT
+                  ELSEIF nLevel > 0 .AND. nLevel <= nTemp
+                     // Head of New Adjucent or Outer group - Adjust stop condition...
+                     nTemp := nLevel
+                     bTestDependant := .F.
+                     LOOP
+                  ELSEIF nLevel < 0 .AND. ( ( ( - nLevel ) < nTemp ) .OR. ( bTestDependant .AND. ( ( - nLevel ) == nTemp ) ) )
+                     EXIT
+                  ENDIF
+               ENDDO
+
+               IF nMatch > nMatches
+                  sLine := ( PPOut( aResults[nRule], aMarkers ) + sPad + sWorkLine )
+                  IF bDbgMatch
+                     ? "Skipped optionals and TRANSLATED to:", sLine
+                     WAIT
+                  ENDIF
+                  RETURN nRule
+               ELSE
+                  // Must consider this match a failure because End of input but NOT end of rule - REVERT if OPTIONAL.
+                  IF aMP[2] <> 0
+                     nMatch := nBackup
+
+                     /* Skip all same level optionals to next group. */
+                     nTemp := Abs( aMP[2] )
+                     WHILE nMatch < nMatches
+                        nMatch++
+                        aMP := aRules[nRule][2][nMatch]
+                        IF ( aMP[2] < 0 ) .AND. ( Abs( aMP[2] ) < nTemp )
+                           EXIT
+                        ENDIF
+                        IF ( aMP[2] >= 0 ) .AND. ( aMP[2] <= nTemp )
+                           EXIT
+                        ENDIF
+                     ENDDO
+
+                     IF bDbgMatch
+                        ? "Skipped to:", nMatch
+                     ENDIF
+
+                     // Because will LOOP
+                     nMatch--
+
+                     /* Revert. */
+                     IF nOptional <> 0 .AND. aMP[2] < 0 .AND. asRevert[Abs(nOptional)] != NIL
+                        sWorkLine := asRevert[Abs(nOptional)]
+                        aMarkers  := aaRevertMarkers[Abs(nOptional)]
+
+                        IF bDbgMatch
+                           ? "* Reverted: " + asRevert[Abs(nOptional)]
+                           WAIT
+                        ENDIF
+                     ELSE
+                        sWorkLine := sPreMatch
+                        IF bDbgMatch
+                           ? "*** Reclaimed token/marker: " + sWorkLine
+                           WAIT
+                        ENDIF
+                     ENDIF
+
+                     LOOP
+                  ELSE
+                     IF bDbgMatch
+                        ? "*** Match Failed - Not Revertable and Not End of Rule, but End of Input ***"
+                        WAIT
+                     ENDIF
+
+                     bNext := .T.
+                     EXIT
+                  ENDIF
+
+               ENDIF
+
+            ENDIF
+
             IF aMP[2] <> 0
                IF bDbgMatch
                   ? "Optional"
@@ -3703,37 +3969,21 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                IF nMatch == nMatches .OR. ( aRules[nRule][2][nMatch + 1][2] >= 0 .AND. aRules[nRule][2][nMatch + 1][2] <= Abs( aMP[2] ) ) .OR. ;
                                           ( aRules[nRule][2][nMatch + 1][2] < 0 .AND. abs( aRules[nRule][2][nMatch + 1][2] ) < Abs( aMP[2] ) )
 
-                  // EOL - Rule will match if rest is OPTIONAL.
-                  IF Empty( sWorkLine )
-                     IF bDbgMatch
-                        ? "EOL exiting."
-                     ENDIF
-
-                     IF ++nMatch <= nMatches
-                        aMP := aRules[nRule][2][nMatch]
-                        sPreMatch := ""
-                     ENDIF
-
-                     EXIT
-                  ENDIF
-
                   /* Current level */
-                  nOptional := aMP[2]
-                  IF Len( asRevert ) >= Abs( nOptional )
-                     asRevert[ Abs( nOptional ) ] := NIL
+                  nOptional := Abs( aMP[2] )
+
+                  IF Len( asRevert ) >= nOptional
+                     asRevert[ nOptional ] := NIL
                   ENDIF
 
-                  IF nOptional < 0
-                     nOptional := Abs( nOptional )
-                  ENDIF
-
-                  WHILE nMatch > 1
-                     nMatch--
-                     IF /*aRules[nRule][2][nMatch][2] >= 0 .AND.*/ Abs( aRules[nRule][2][nMatch][2] ) < nOPtional
-                        EXIT
-                     ENDIF
-                  ENDDO
-                  IF nMatch == 0 .OR. ( /*aRules[nRule][2][nMatch][2] >= 0 .AND.*/ Abs( aRules[nRule][2][nMatch][2] ) < nOPtional )
+                  IF nMatch > 1
+                     // Now rewind.
+                     WHILE nMatch > 1
+                        nMatch--
+                        IF Abs( aRules[nRule][2][nMatch][2] ) < nOPtional
+                           EXIT
+                        ENDIF
+                     ENDDO
                      nMatch++
                   ENDIF
 
@@ -3790,6 +4040,7 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                ? "NO MATCH:", nMatch, "of", nMatches, sAnchor, sToken, nMarkerId, xMarker, nOptional, aMP[2]
             ENDIF
 
+            // Optional
             IF aMP[2] <> 0
                /* Revert. */
                IF nOptional <> 0 .AND. aMP[2] < 0 .AND. asRevert[Abs(nOptional)] != NIL
@@ -3818,9 +4069,32 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                   */
                ENDIF
 
+               // TODO: rethink this! Should only match if failure becuase we ran out of input and OPTIONAL. ???
+
                /* Optional (last) didn't match - Rule can still match. */
                IF nMatch == nMatches
                   IF bStatement .AND. ! Empty( sWorkLine )
+                     /* Top of nested optional. */
+                     IF aMP[2] > 1
+                        /* Upper level optional should be accepted - rewind to top of parent group. */
+                        nOptional--
+                        WHILE nMatch > 1
+                           nMatch--
+                           IF Abs( aRules[nRule][2][nMatch][2] ) < nOPtional
+                              EXIT
+                           ENDIF
+                        ENDDO
+                        nMatch++
+
+                        nOptional := 0
+
+                        IF bDbgMatch
+                           ? "Nested last optional, Rewinded to:", nMatch
+                        ENDIF
+
+                        LOOP
+                     ENDIF
+
                      bNext := .T.
 
                      IF bDbgMatch
@@ -3841,29 +4115,26 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                   ENDIF
                   RETURN nRule
                ELSE
-                  /* Nested optional, maybe last in its group. */
+                  /* Top of Nested optional, maybe last in its parrent group. */
                   IF aMP[2] > 1
-                     nTemp := aMP[2]
                      /* Skip dependents and nested optionals, if any. */
+                     nTemp := aMP[2]
                      nMatch++
-                     WHILE nMatch < nMatches .AND. ( ( aRules[nRule][2][nMatch][2] < 0 .AND. Abs( aRules[nRule][2][nMatch][2] ) == nTemp ).OR. aRules[nRule][2][nMatch][2] > nTemp )
+                     WHILE nMatch <= nMatches .AND. Abs( aRules[nRule][2][nMatch][2] ) >= nTemp
                         nMatch++
                      ENDDO
-                     nMatch--
 
-                     IF aRules[nRule][2][nMatch + 1][2] > 0 .AND. aRules[nRule][2][nMatch + 1][2] < nTemp
+                     // End of rule or reached end of parrent group.
+                     IF nMatch > nMatches .OR. aRules[nRule][2][nMatch][2] >= 0 .OR. nTemp + aRules[nRule][2][nMatch][2] > 1
                         /* Upper level optional should be accepted - rewind to top of parent group. */
                         nOptional--
-
                         WHILE nMatch > 1
                            nMatch--
-                           IF aRules[nRule][2][nMatch][2] == 0 .OR. ( aRules[nRule][2][nMatch][2] > 0 .AND. aRules[nRule][2][nMatch][2] < nOPtional )
+                           IF Abs( aRules[nRule][2][nMatch][2] ) < nOPtional
                               EXIT
                            ENDIF
                         ENDDO
-                        IF nMatch == 0 .OR. ( aRules[nRule][2][nMatch][2] == 0 .OR. ( aRules[nRule][2][nMatch][2] > 0 .AND. aRules[nRule][2][nMatch][2] < nOptional ) )
-                           nMatch++
-                        ENDIF
+                        nMatch++
 
                         nOptional := 0
 
@@ -3872,20 +4143,29 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                         ENDIF
 
                         LOOP
+                     ELSEIF aRules[nRule][2][nMatch][2] < 0
+                        // More optionals of the upper level - try to continue matching.
+                        IF bDbgMatch
+                           ? "Resuming optionals of upper group at match:", nMatch
+                        ENDIF
+
+                        LOOP
+                     ELSE
+                        // Will proceed below (skip to next group) ...
                      ENDIF
 
                   ENDIF
 
                   /* Skip all same level optionals to next group. */
-                  nOptional          := aMP[2]
+                  nOptional          := Abs( aMP[2] )
                   bRepeatableMatched := aMP[1] > 1000 .AND. aMarkers[ aMP[1] - 1000 ] != NIL //.AND. Len( aMarkers[ aMP[1] - 1000 ] ) > 0
                   WHILE nMatch < nMatches
                      nMatch++
                      aMP := aRules[nRule][2][nMatch]
-                     IF ( aMP[2] < 0 ) .AND. ( Abs( aMP[2] ) < Abs( nOptional ) )
+                     IF ( aMP[2] < 0 ) .AND. ( Abs( aMP[2] ) < nOptional )
                         EXIT
                      ENDIF
-                     IF ( aMP[2] >= 0 ) .AND. ( aMP[2] <= Abs( nOptional ) )
+                     IF ( aMP[2] >= 0 ) .AND. ( aMP[2] <= nOptional )
                         EXIT
                      ENDIF
                   ENDDO
@@ -3893,7 +4173,7 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                   // We should NOT consider this a failure, continue matching...
                   IF bRepeatableMatched
                      IF bDbgMatch
-                        ? "Repeatable Matched - Skipped to", nMatch, "of", nMatches, aMP[2], aMP[3], nOptional
+                        ? "Repeatable previously Matched - Skipped to", nMatch, "of", nMatches, aMP[2], aMP[3], nOptional
                      ENDIF
 
                      nOptional := aMP[2]
@@ -5031,10 +5311,11 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
 
   FOR Counter := 1 TO nResults
 
-      IF bDbgPPO
-         ? Counter, "of:", nResults, sResult, nGroupStart, nRepeats
-         WAIT
-      ENDIF
+     IF bDbgPPO
+        ? sResult
+        ? Counter, "of:", nResults, nGroupStart, nRepeats
+        WAIT
+     ENDIF
 
      /* Normal mode. */
      IF nRepeats == 0
@@ -5056,16 +5337,6 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
               anMarkers := {}
               bBuildList := .T.
            ENDIF
-
-        #ifdef z
-           IF aMarkers[ nDependee ] == NIL
-              nRepeats := 0
-           ELSE
-              nRepeats := Len( aMarkers[ nDependee ] )
-              anMarkers := {}
-              bBuildList := .T.
-           ENDIF
-        #endif
 
            IF bDbgPPO
               ? Counter, nDependee, aMarkers, ValType( aMarkers ), nRepeats
@@ -5138,6 +5409,42 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
               //ENDIF
            ELSE
               sResult += aResults[1][Counter][2]
+
+              IF nRepeats > 1 .AND. Counter == nResults
+                 nRepeats--
+                 Counter := nGroupStart - 1
+
+                 bBuildList := .F.
+
+                 nMarkers := Len( anMarkers )
+                 FOR nMarker := 1 TO nMarkers
+                    // Clipper does not remove optional nested repeatable which only has single value if main repeatable has more values.
+                    IF ValType( aMarkers[ anMarkers[nMarker] ] ) == 'A' .AND. ( Len( aBackup[ anMarkers[1] ] ) = 1 .OR. Len( aMarkers[ anMarkers[nMarker] ] ) > 1 )
+                       aDel( aMarkers[ anMarkers[nMarker] ], 1 )
+                       aSize( aMarkers[ anMarkers[nMarker] ], nRepeats )
+                       IF bDbgPPO
+                          ? nMarker, "Removed Repeatable"
+                          WAIT
+                       ENDIF
+                    ELSE
+                       IF bDbgPPO
+                          ? nMarker, Len( aBackup[ anMarkers[1] ] ), Len( aMarkers[ anMarkers[nMarker] ] ),"Removed Repeatable"
+                          WAIT
+                       ENDIF
+                    ENDIF
+                 NEXT
+
+                 IF bDbgPPO
+                    ? "END - Looping: ", Counter, nMarker, nGroupStart, nRepeats
+                    WAIT
+                 ENDIF
+              ENDIF
+
+              IF bDbgPPO
+                 ? "Bottom: ", Counter, nMarker, nGroupStart, nRepeats
+                 WAIT
+              ENDIF
+
               LOOP
            ENDIF
         ELSE
@@ -5179,7 +5486,7 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
               // Restore for possible re-use.
               aMarkers := aClone( aBackup )
 
-                 /* Recheck this item in "normal" mode. */
+              /* Recheck this item in "normal" mode. */
               Counter--
               LOOP
            ENDIF
@@ -8083,7 +8390,7 @@ STATIC FUNCTION InitRunRules()
    aAdd( aTransRules, { 'QSELF' , { {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
    aAdd( aTransRules, { 'ADDMETHOD' , { {    1,   0, '(', '<', NIL }, {    0,   0, ',', NIL, NIL }, {    2,   0, '@', '!', NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL }, {    3,   0, ',', '<', NIL }, {    4,   0, ',', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
    aAdd( aTransRules, { ':' , { {    0,   0, ':', NIL, NIL } } , .F. } )
-   aAdd( aTransRules, { '_GET_' , { {    1,   0, '(', '<', NIL }, {    2,   0, ',', '!', NIL }, {    0,   0, ',', NIL, NIL }, {    3,   1, NIL, '<', { ',' } }, {    0,   0, ',', NIL, NIL }, {    4,   1, NIL, '<', { ',' } }, {    0,   0, ',', NIL, NIL }, {    5,   1, NIL, '<', { ')' } }, {    0,   0, ')', NIL, NIL } } , .F. } )
+   aAdd( aTransRules, { '_GET_' , { {    1,   0, '(', '<', NIL }, {    2,   0, ',', '<', NIL }, {    0,   0, ',', NIL, NIL }, {    3,   1, NIL, '<', { ',' } }, {    0,   0, ',', NIL, NIL }, {    4,   1, NIL, '<', { ',' } }, {    0,   0, ',', NIL, NIL }, {    5,   1, NIL, '<', { ')' } }, {    0,   0, ')', NIL, NIL } } , .F. } )
    aAdd( aTransRules, { '__GET' , { {    1,   0, '(', 'A', NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ':', NIL, NIL }, {    0,   0, 'DISPLAY', NIL, NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
    aAdd( aTransRules, { 'PROCNAME' , { {    0,   0, '(', NIL, NIL }, {    1,   1, NIL, '<', { ')' } }, {    0,   0, ')', NIL, NIL } } , .F. } )
    aAdd( aTransRules, { 'PROCLINE' , { {    0,   0, '(', NIL, NIL }, {    1,   1, NIL, '<', { ')' } }, {    0,   0, ')', NIL, NIL } } , .F. } )
@@ -8203,7 +8510,7 @@ STATIC FUNCTION InitRunResults()
 RETURN .T.
 
 //--------------------------------------------------------------//
-PROCEDURE PP_RunInit( aProcedures, aInitExit )
+PROCEDURE PP_RunInit( aProcedures, aInitExit, nLine )
 
    IF ValType( aProcedures ) != 'A' .OR. ValType( aInitExit ) != 'A'
       Alert( [Invalid parameters to: ] + ProcName() + [ must be Arrays!] )
@@ -8215,7 +8522,7 @@ PROCEDURE PP_RunInit( aProcedures, aInitExit )
       aInitExit[2] := {}
    ENDIF
 
-   ErrorBlock( {|oErr| RP_Run_Err( oErr, aProcedures ) } )
+   ErrorBlock( {|oErr| RP_Run_Err( oErr, aProcedures, nLine ) } )
 
    InitRules()
    InitResults()
@@ -8226,18 +8533,24 @@ PROCEDURE PP_RunInit( aProcedures, aInitExit )
 RETURN
 
 //--------------------------------------------------------------//
-FUNCTION PP_PreProText( sLines, asLines )
+FUNCTION PP_PreProText( sLines, asLines, bBlanks )
 
    LOCAL nOpen, nClose, sTemp := "", nLine, nLines
 
    //ErrorBlock( {|oErr| RP_PPText_Err( oErr, sLines, 0 ) } )
 
+   //TraceLog( sLines )
+
+   IF bBlanks == NIL
+      bBlanks := .T.
+   ENDIF
+
    IF asLines == NIL
       asLines := {}
    ENDIF
 
-   sLines := StrTran( sLines, Chr(13), "" )
-   sLines := StrTran( sLines, Chr(9), "   " )
+   sLines := StrTran( sLines, Chr(13), " " )
+   sLines := StrTran( sLines, Chr(9), " " )
 
    WHILE ( nOpen := nAtSkipStr( "/*", sLines ) ) > 0
       sTemp += Left( sLines, nOpen - 1 )
@@ -8254,39 +8567,62 @@ FUNCTION PP_PreProText( sLines, asLines )
 
    //ErrorBlock( {|oErr| RP_PPText_Err( oErr, SubStr( sLines, nClose + 1, nOpen - ( nClose + 1 ) ), 0 ) } )
 
-   WHILE ( nOpen := nAtSkipStr( Chr(10), sLines, nOpen + 1 ) ) > 0
+   WHILE ( nOpen := At( Chr(10), sLines, nOpen + 1 ) ) > 0
+      //TraceLog( nClose, nOpen )
       aAdd( asLines, RTrim( LTrim( SubStr( sLines, nClose + 1, nOpen - ( nClose + 1 ) ) ) ) )
+      //TraceLog( Len( asLines ), aTail( asLines ) )
       nClose := nOpen
    ENDDO
    IF Len( sLines ) > nClose
       aAdd( asLines, RTrim( LTrim( SubStr( sLines, nClose + 1 ) ) ) )
+      //TraceLog( Len( asLines) , aTail( asLines ) )
    ENDIF
 
    //ErrorBlock( {|oErr| RP_PPText_Err( oErr, asLines[nLine], nLine ) } )
 
    nLines := Len( asLines )
    FOR nLine := 1 TO nLines
-      DO WHILE Empty( asLines[nLine] ) .OR. Left( asLines[nLine], 1 ) == '*'
-         aDel( asLines, nLine )
-         nLines--
-         aSize( asLines, nLines )
-				 IF nLine > nLines
-						EXIT
-				 ENDIF
+      sTemp := asLines[nLine]
+      //TraceLog( sTemp )
+
+      DO WHILE Empty( sTemp ) .OR. Left( sTemp, 1 ) == '*'
+         //TraceLog( nLine, nLines, sTemp )
+         IF bBlanks
+            asLines[nLine] := NIL
+            nLine++
+            IF nLine > nLines
+               EXIT
+            ENDIF
+            sTemp := asLines[nLine]
+         ELSE
+            aDel( asLines, nLine )
+            nLines--
+            aSize( asLines, nLines )
+            IF nLine > nLines
+               EXIT
+            ENDIF
+         ENDIF
       ENDDO
 
 			IF nLine > nLines
 			 	EXIT
 			ENDIF
 
-      nOpen := nAtSkipStr( "&&", asLines[nLine] )
+      //TraceLog( nLine, nLines, sTemp )
+
+      nOpen := nAtSkipStr( "&&", sTemp )
       IF nOpen > 0
          IF nOpen == 1
-            aDel( asLines, nLine )
-            nLine--
-            nLines--
-            aSize( asLines, nLines )
-            LOOP
+           IF bBlanks
+              asLines[nLine] := NIL
+              LOOP
+           ELSE
+              aDel( asLines, nLine )
+              nLine--
+              nLines--
+              aSize( asLines, nLines )
+              LOOP
+            ENDIF
          ENDIF
          sTemp := Left( asLines[nLine], nOpen - 1 )
       ELSE
@@ -8296,11 +8632,17 @@ FUNCTION PP_PreProText( sLines, asLines )
       nOpen := nAtSkipStr( "//", sTemp )
       IF nOpen > 0
          IF nOpen == 1
-            aDel( asLines, nLine )
-            nLine--
-            nLines--
-            aSize( asLines, nLines )
-            LOOP
+            IF bBlanks
+               asLines[nLine] := NIL
+               //TraceLog( "LOOP" )
+               LOOP
+            ELSE
+               aDel( asLines, nLine )
+               nLine--
+               nLines--
+               aSize( asLines, nLines )
+               LOOP
+            ENDIF
          ENDIF
          sTemp := Left( sTemp, nOpen - 1 )
       ENDIF
@@ -8309,26 +8651,73 @@ FUNCTION PP_PreProText( sLines, asLines )
    NEXT
 
    sLines := ""
+
+   IF nLines == 0
+      RETURN ""
+   ENDIF
+
+   //TraceLog( nLines )
+
+   // Don't process the last line for [;].
+   nLines--
    FOR nLine := 1 TO nLines
       sTemp := asLines[nLine]
+      //TraceLog( sTemp )
+      IF sTemp == NIL
+         LOOP
+      ENDIF
 
       DO WHILE Right( sTemp, 1 ) == ';'
-         aDel( asLines, nLine )
-         nLines--
-         aSize( asLines, nLines )
-         // nLine now points to the next line.
-         sTemp := Left( sTemp, Len( sTemp ) - 1 ) + asLines[nLine]
+         IF bBlanks
+            #ifdef __STR_INDEX__
+               sTemp[-1] := ' '
+            #else
+               sTemp := Left( sTemp, Len( sTemp ) - 1 ) + ' '
+            #endif
+            asLines[nLine] := NIL
+            nLine++
+            IF asLines[nLine] == NIL
+               asLines[nLine] := sTemp
+            ELSE
+               asLines[nLine] := sTemp + asLines[nLine]
+            ENDIF
+            sTemp := asLines[nLine]
+         ELSE
+            aDel( asLines, nLine )
+            nLines--
+            aSize( asLines, nLines )
+            // nLine now points to the next line.
+            sTemp := Left( sTemp, Len( sTemp ) - 1 ) + ' ' + asLines[nLine]
+         ENDIF
       ENDDO
 
       sTemp := PP_PreProLine( sTemp )
 
       sLines += sTemp
-      IF nLine < nLines
-         sLines += ";"
-      ENDIF
+      sLines += ";"
 
-      asLines[nLine] := sTemp
+      IF sTemp == ""
+         asLines[nLine] := NIL
+      ELSE
+         asLines[nLine] := sTemp
+      ENDIF
+      //TraceLog( nLine, sTemp )
    NEXT
+
+   sTemp := asLines[nLine]
+
+   IF sTemp != NIL
+      sTemp := PP_PreProLine( sTemp )
+      sLines += sTemp
+   ENDIF
+
+   IF sTemp == ""
+      asLines[nLine] := NIL
+   ELSE
+      asLines[nLine] := sTemp
+   ENDIF
+
+   //TraceLog( nLine, sTemp, sLines )
 
 RETURN sLines
 
@@ -8336,19 +8725,20 @@ RETURN sLines
 FUNCTION PP_RunText( sLines, bPP, aParams )
 
    LOCAL aProcedures := {}, aInitExit := { {}, {} }, nProcId := 0, ;
-         nLine, nLines, xRet, asLines := {}, nOpen, nClose
+         nLine, nLines, xRet, asLines := {}, nOpen, nClose, sLine
 
    IF bPP == NIL
       bPP := .T.
    ENDIF
 
-   PP_RunInit( aProcedures, aInitExit )
+   PP_RunInit( aProcedures, aInitExit, @nLine )
 
    IF bPP
       PP_PreProText( sLines, asLines )
    ELSE
       sLines := StrTran( sLines, Chr(13), "" )
-      sLines := StrTran( sLines, Chr(9), "   " )
+      sLines := StrTran( sLines, Chr(9), " " )
+      sLines := StrTran( sLines, ';', Chr(10) )
       nOpen  := 0
       nClose := 0
       WHILE ( nOpen := nAtSkipStr( Chr(10), sLines, nOpen + 1 ) ) > 0
@@ -8364,7 +8754,10 @@ FUNCTION PP_RunText( sLines, bPP, aParams )
 
    nLines := Len( asLines )
    FOR nLine := 1 TO nLines
-      PP_CompileLine( asLines[nLine], nLine, aProcedures, aInitExit, @nProcId )
+      sLine := asLines[nLine]
+      IF sLine != NIL
+         PP_CompileLine( sLine, nLine, aProcedures, aInitExit, @nProcId )
+      ENDIF
    NEXT
 
 RETURN PP_Exec( aProcedures, aInitExit, nProcId, aParams )
@@ -8375,13 +8768,15 @@ FUNCTION PP_RunArray( asLines, aParams )
    LOCAL aProcedures := {}, aInitExit := { {}, {} }, nProcId := 0, ;
          nLine, nLines, nOpen, nClose
 
-   PP_RunInit( aProcedures, aInitExit )
+   PP_RunInit( aProcedures, aInitExit, @nLine )
 
    ErrorBlock( {|oErr| RP_Comp_Err( oErr, asLines[nLine], nLine ) } )
 
    nLines := Len( asLines )
    FOR nLine := 1 TO nLines
-      PP_CompileLine( asLines[nLine], nLine, aProcedures, aInitExit, @nProcId )
+      IF asLines[nLine] != NIL
+         PP_CompileLine( asLines[nLine], nLine, aProcedures, aInitExit, @nProcId )
+      ENDIF
    NEXT
 
 RETURN PP_Exec( aProcedures, aInitExit, nProcId, aParams )
@@ -8422,6 +8817,8 @@ FUNCTION PP_Exec( aProcedures, aInitExit, nProcId, aParams )
       PP_ExecProcedure( aProcedures[ aInitExit[2][nProc] ] )
    NEXT
 
+   //TraceLog( xRet )
+
 RETURN xRet
 
 //--------------------------------------------------------------//
@@ -8461,29 +8858,43 @@ PROCEDURE PP_LoadRun()
 RETURN
 
 //--------------------------------------------------------------//
-PROCEDURE PP_LoadClass()
 
-   IF ! s_lClsLoaded
-      s_lClsLoaded := .T.
-      InitClsRules()
-      InitClsResults()
-   ENDIF
-
-RETURN
-
-//--------------------------------------------------------------//
-PROCEDURE PP_LoadFW()
-
-   IF ! s_lFWLoaded
-      s_lFWLoaded := .T.
-      InitFWRules()
-      InitFWResults()
-   ENDIF
-
-RETURN
-
-//--------------------------------------------------------------//
 #ifdef __HARBOUR__
+
+   //--------------------------------------------------------------//
+   PROCEDURE PP_LoadClass()
+
+      IF ! s_lClsLoaded
+         s_lClsLoaded := .T.
+         InitClsRules()
+         InitClsResults()
+      ENDIF
+
+   RETURN
+
+   //--------------------------------------------------------------//
+   PROCEDURE PP_LoadFW()
+
+      IF ! s_lFWLoaded
+         s_lFWLoaded := .T.
+         InitFWRules()
+         InitFWResults()
+      ENDIF
+
+   RETURN
+
+   //--------------------------------------------------------------//
+   PROCEDURE PP_LoadMiniGUI()
+
+      IF ! s_lMiniGUILoaded
+         s_lMiniGUILoaded := .T.
+         InitMiniGUIRules()
+         InitMiniGUIResults()
+      ENDIF
+
+   RETURN
+
+   //--------------------------------------------------------------//
    FUNCTION PP_CompileText( sLines )
    RETURN PP_CompileLine( sLines )
 #endif
@@ -8491,12 +8902,6 @@ RETURN
 //--------------------------------------------------------------//
 #ifdef __HARBOUR__
    #include "pp_harb.ch"
-#else
-   STATIC FUNCTION InitFWRules()
-   RETURN .T.
-
-   STATIC FUNCTION InitFWResults()
-   RETURN .T.
 #endif
 
 //--------------------------------------------------------------//

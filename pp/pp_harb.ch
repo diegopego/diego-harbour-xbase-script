@@ -23,1733 +23,788 @@
 
 #ifdef __HARBOUR__
 
-#include "hbclass.ch"
+  #include "hbclass.ch"
 
-//----------------------------------------------------------------------------//
-CLASS  TInterpreter
+  //----------------------------------------------------------------------------//
+  CLASS  TInterpreter
 
-   DATA cText
-   DATA acPPed
-   DATA cPPed
-   DATA aCompiledProcs
-   DATA aInitExit
-   DATA nProcs
-   DATA aScriptHostGlobals   INIT {}
+     DATA cText
+     DATA acPPed
+     DATA cPPed
+     DATA aCompiledProcs
+     DATA aInitExit
+     DATA nProcs
+     DATA aScriptHostGlobals   INIT {}
 
-   METHOD New()              INLINE ( ::nProcs := 0, ::cText := "", ::acPPed := {}, ::aCompiledProcs := {}, ::aInitExit := { {}, {} }, Self )
+     METHOD New()              INLINE ( ::nProcs := 0, ::cText := "", ::acPPed := {}, ::aCompiledProcs := {}, ::aInitExit := { {}, {} }, Self )
 
-   METHOD AddLine( cLine )   INLINE ( ::nProcs := 0, ::acPPed := {}, ::cText += ( cLine + Chr(10) ) )
-   METHOD SetScript( cText ) INLINE ( ::nProcs := 0, ::acPPed := {}, ::cText := cText )
-   METHOD GetPPO()           INLINE ( ::cPPed )
+     METHOD AddLine( cLine )   INLINE ( ::nProcs := 0, ::acPPed := {}, ::cText += ( cLine + Chr(10) ) )
+     METHOD SetScript( cText ) INLINE ( ::nProcs := 0, ::acPPed := {}, ::cText := cText )
+     METHOD GetPPO()           INLINE ( ::cPPed )
 
-   METHOD Compile()
-   METHOD Run()
-   METHOD RunFile( cFile, aParams, cPPOExt, bBlanks ) INLINE PP_Run( cFile, aParams, cPPOExt, bBlanks )
+     METHOD Compile()
+     METHOD Run()
+     METHOD RunFile( cFile, aParams, cPPOExt, bBlanks ) INLINE PP_Run( cFile, aParams, cPPOExt, bBlanks )
 
-   METHOD ClearRules()       INLINE PP_ResetRules()
-   METHOD InitStdRules()     INLINE PP_InitStd()
-   METHOD LoadClass()        INLINE PP_LoadClass()
-   METHOD LoadFiveWin()      INLINE PP_LoadFw()
+     METHOD ClearRules()       INLINE PP_ResetRules()
+     METHOD InitStdRules()     INLINE PP_InitStd()
+     METHOD LoadClass()        INLINE PP_LoadClass()
 
-#ifdef WIN
-   METHOD ScriptSiteAddGlobal( cName, pDisp )
-   METHOD ScriptSiteAutomateGlobals()
-#endif
+     #ifdef FW
+       METHOD LoadFiveWin()      INLINE PP_LoadFw()
+     #endif
 
-ENDCLASS
+     #ifdef MINIGUI
+       METHOD LoadMiniGUI()      INLINE PP_LoadMiniGUI()
+     #endif
 
-//----------------------------------------------------------------------------//
-METHOD Run( p1, p2, p3, p4, p5, p6, p7, p8, p9 ) CLASS  TInterpreter
+     #ifdef WIN
+       METHOD ScriptSiteAddGlobal( cName, pDisp )
+       METHOD ScriptSiteAutomateGlobals()
+     #endif
 
-   LOCAL aParams := HB_aParams(), xRet
+  ENDCLASS
 
-   IF ::nProcs == 0
-      ::Compile()
-   ENDIF
+  //----------------------------------------------------------------------------//
+  METHOD Run( p1, p2, p3, p4, p5, p6, p7, p8, p9 ) CLASS  TInterpreter
 
-   IF ::nProcs > 0
-      xRet := PP_Exec( ::aCompiledProcs, ::aInitExit, ::nProcs, aParams )
-   ENDIF
+     LOCAL aParams := HB_aParams(), xRet
 
-RETURN xRet
+     IF ::nProcs == 0
+        ::Compile()
+     ENDIF
 
-//----------------------------------------------------------------------------//
-METHOD Compile() CLASS  TInterpreter
+     IF ::nProcs > 0
+        xRet := PP_Exec( ::aCompiledProcs, ::aInitExit, ::nProcs, aParams )
+     ENDIF
 
-   LOCAL nLine, nLines, nProcId := 0
+  RETURN xRet
 
-   IF Len( ::acPPed ) == 0
-      PP_InitStd()
-      PP_LoadRun()
-      ::cPPed          := PP_PreProText( ::cText, ::acPPed )
-      ::aCompiledProcs := {}
-      ::aInitExit      := { {}, {} }
-   ENDIF
+  //----------------------------------------------------------------------------//
+  METHOD Compile() CLASS  TInterpreter
 
-   IF Len( ::aCompiledProcs ) == 0
-      ErrorBlock( {|oErr| RP_Comp_Err( oErr, ::acPPed[nLine], nLine ) } )
+     LOCAL nLine, nLines, sLine, nProcId := 0
 
-      PP_ModuleName( "_TINTERPRETER_" )
+     IF Len( ::acPPed ) == 0
+        PP_InitStd()
+        PP_LoadRun()
+        ::cPPed          := PP_PreProText( ::cText, ::acPPed )
+        ::aCompiledProcs := {}
+        ::aInitExit      := { {}, {} }
+     ENDIF
 
-      nLines := Len( ::acPPed )
-      FOR nLine := 1 TO nLines
-         PP_CompileLine( ::acPPed[nLine], nLine, ::aCompiledProcs, ::aInitExit, @nProcId )
-      NEXT
-   ENDIF
+     IF Len( ::aCompiledProcs ) == 0
+        ErrorBlock( {|oErr| RP_Comp_Err( oErr, ::acPPed[nLine], nLine ) } )
 
-   ::nProcs := nProcId
+        PP_ModuleName( "_TINTERPRETER_" )
 
-RETURN nProcId > 0
+        nLines := Len( ::acPPed )
+        FOR nLine := 1 TO nLines
+           sLine := ::acPPed[nLine]
+           IF sLine != NIL
+              PP_CompileLine( sLine, nLine, ::aCompiledProcs, ::aInitExit, @nProcId )
+           ENDIF
+        NEXT
+     ENDIF
 
-//----------------------------------------------------------------------------//
-#ifdef WIN
-METHOD ScriptSiteAddGlobal( cName, pDisp ) CLASS  TInterpreter
+     ::nProcs := nProcId
 
-   LOCAL oGlobal := TOleAuto():New( pDisp, cName )
+  RETURN nProcId > 0
 
-   aAdd( ::aScriptHostGlobals, { cName, pDisp } )
+  //----------------------------------------------------------------------------//
 
-   __QQPub( cName )
-   __MVPUT( cName, oGlobal )
+  #ifdef WIN
 
-RETURN Self
+    METHOD ScriptSiteAddGlobal( cName, pDisp ) CLASS  TInterpreter
 
-//----------------------------------------------------------------------------//
-METHOD ScriptSiteAutomateGlobals() CLASS  TInterpreter
+       LOCAL oGlobal := TOleAuto():New( pDisp, cName )
 
-   LOCAL aGlobals := ::aScriptHostGlobals
-   LOCAL nGlobals := Len( aGlobals ), nGlobal
-   LOCAL cName, pDisp
+       aAdd( ::aScriptHostGlobals, { cName, pDisp } )
 
-   FOR nGlobal := 1 TO nGlobals
-      cName := aGlobals[ nGlobal ][1]
-      pDisp := aGlobals[ nGlobal ][2]
-      __QQPub( cName )
-      __MVPUT( cName, TOleAuto():New( pDisp ) )
-   NEXT
+       __QQPub( cName )
+       __MVPUT( cName, oGlobal )
 
-RETURN .T.
+    RETURN Self
 
-#endif
+    //----------------------------------------------------------------------------//
 
-//----------------------------------------------------------------------------//
+    METHOD ScriptSiteAutomateGlobals() CLASS  TInterpreter
 
-#ifdef USE_C_BOOST
+       LOCAL aGlobals := ::aScriptHostGlobals
+       LOCAL nGlobals := Len( aGlobals ), nGlobal
+       LOCAL cName, pDisp
 
-#ifdef __XHARBOUR__
-   #pragma BEGINDUMP
-      #define __XHARBOUR__
-   #pragma ENDDUMP
-#endif
+       FOR nGlobal := 1 TO nGlobals
+          cName := aGlobals[ nGlobal ][1]
+          pDisp := aGlobals[ nGlobal ][2]
+          __QQPub( cName )
+          __MVPUT( cName, TOleAuto():New( pDisp ) )
+       NEXT
 
-#pragma BEGINDUMP
+    RETURN .T.
 
-#include <ctype.h>
-#include "hbapi.h"
-#include "hbstack.h"
-#include "hbapierr.h"
-#include "hbapiitm.h"
-#include "hbvm.h"
-#include "hboo.ch"
+  #endif
 
-#ifdef __XHARBOUR__
-  #include "hbfast.h"
-#endif
+  //----------------------------------------------------------------------------//
 
-static BOOL s_bArrayPrefix = FALSE;
+  #ifdef USE_C_BOOST
 
-//----------------------------------------------------------------------------//
-static HB_FUNC( SETARRAYPREFIX )
-{
-   PHB_ITEM pbArrayPrefix = hb_param( 1, HB_IT_LOGICAL );
+    #ifdef __XHARBOUR__
+       #pragma BEGINDUMP
+          #define __XHARBOUR__
+       #pragma ENDDUMP
+    #endif
 
-   if( pbArrayPrefix != NULL )
-   {
-      s_bArrayPrefix = pbArrayPrefix->item.asLogical.value;
-   }
-}
+    #pragma BEGINDUMP
 
-//----------------------------------------------------------------------------//
-static HB_FUNC( NEXTTOKEN )
-{
-   PHB_ITEM pLine       = hb_param( 1, HB_IT_STRING );
-   PHB_ITEM pDontRecord = hb_param( 2, HB_IT_LOGICAL );
-   char *sLine, *pTmp;
-   char sReturn[2048];
-   char s2[3];
-   BOOL lDontRecord;
-   size_t Counter, nLen;
+      #include <ctype.h>
 
-   if( pLine == NULL || pLine->item.asString.length == 0 )
-   {
-      hb_ret();
-      return;
-   }
+      #include "hbapi.h"
+      #include "hbstack.h"
+      #include "hbapierr.h"
+      #include "hbapiitm.h"
+      #include "hbvm.h"
 
-   sLine = pLine->item.asString.value;
-   nLen = pLine->item.asString.length;
+      #ifdef __XHARBOUR__
+        #include "hbfast.h"
+      #endif
 
-   //printf( "\nProcessing: '%s'\n", sLine );
+      static BOOL s_bArrayPrefix = FALSE;
 
-   if( pDontRecord == NULL )
-   {
-      lDontRecord = FALSE;
-   }
-   else
-   {
-      lDontRecord = pDontRecord->item.asLogical.value;
-   }
-
-   // *** To be removed after final testing !!!
-   while( sLine[0] == ' ' )
-   {
-      sLine++; nLen--;
-   }
-
-   sReturn[0] = '\0';
-   s2[2]      = '\0';
-
-   if( nLen >= 2 )
-   {
-      s2[0] = sLine[0];
-      s2[1] = sLine[1];
-
-      if( strstr( "++\\--\\->\\:=\\==\\!=\\<>\\>=\\<=\\+=\\-=\\*=\\^=\\**\\/=\\%=\\??", (char*) s2 ) )
+      //----------------------------------------------------------------------------//
+      static HB_FUNC( SETARRAYPREFIX )
       {
-         sReturn[0] = s2[0];
-         sReturn[1] = s2[1];
-         sReturn[2] = '\0';
+         PHB_ITEM pbArrayPrefix = hb_param( 1, HB_IT_LOGICAL );
 
-         goto Done;
-      }
-      else if( s2[0] == '[' && s2[1] == '[' )
-      {
-         pTmp = strstr( sLine + 2, "]]" );
-         if( pTmp == NULL )
+         if( pbArrayPrefix != NULL )
          {
-            sReturn[0] = '['; // Clipper does NOT consider '[[' a single token
-            sReturn[1] = '\0';
+            s_bArrayPrefix = pbArrayPrefix->item.asLogical.value;
+         }
+      }
+
+      //----------------------------------------------------------------------------//
+      static HB_FUNC( NEXTTOKEN )
+      {
+         PHB_ITEM pLine       = hb_param( 1, HB_IT_STRING );
+         PHB_ITEM pDontRecord = hb_param( 2, HB_IT_LOGICAL );
+         char *sLine, *pTmp;
+         char sReturn[2048];
+         char s2[3];
+         BOOL lDontRecord;
+         size_t Counter, nLen;
+
+         if( pLine == NULL || pLine->item.asString.length == 0 )
+         {
+            hb_ret();
+            return;
+         }
+
+         sLine = pLine->item.asString.value;
+         nLen = pLine->item.asString.length;
+
+         //printf( "\nProcessing: '%s'\n", sLine );
+
+         if( pDontRecord == NULL )
+         {
+            lDontRecord = FALSE;
          }
          else
          {
-            strncpy( sReturn, sLine, ( pTmp - sLine ) + 2 );
-            sReturn[( pTmp - sLine ) + 2] = '\0';
+            lDontRecord = pDontRecord->item.asLogical.value;
          }
 
-         goto Done;
-      }
-   }
-
-   if( isalpha( sLine[0] ) || sLine[0] == '_' )
-   {
-      sReturn[0] = sLine[0];
-      Counter = 1;
-      while( isalnum( sLine[Counter] ) || sLine[Counter] == '_' || sLine[Counter] == '\\' )
-      {
-         sReturn[Counter] = sLine[Counter];
-         Counter++;
-      }
-
-      sReturn[Counter] = '\0';
-      goto Done;
-   }
-   else if( isdigit( sLine[0] ) )
-   {
-      sReturn[0] = sLine[0];
-      Counter = 1;
-      while( isdigit( sLine[Counter] ) || sLine[Counter] == '\\' )
-      {
-         sReturn[Counter] = sLine[Counter];
-         Counter++;
-      }
-
-      // Consume the point (and subsequent digits) only if digits follow...
-      if( sLine[Counter] == '.' && isdigit( sLine[Counter + 1] ) )
-      {
-         sReturn[Counter] = '.';
-         Counter++;
-         sReturn[Counter] = sLine[Counter];
-         Counter++;
-         while( isdigit( sLine[Counter] ) || sLine[Counter] == '\\' )
+         // *** To be removed after final testing !!!
+         while( sLine[0] == ' ' )
          {
-            sReturn[Counter] = sLine[Counter];
-            Counter++;
+            sLine++; nLen--;
          }
-      }
 
-      // Either way we are done.
-      sReturn[Counter] = '\0';
-      goto Done;
-   }
-   else if( sLine[0] == '.' && isdigit( sLine[1] ) )
-   {
-      sReturn[0] = '.';
-      sReturn[1] = sLine[1];
-      Counter = 2;
-      while( isdigit( sLine[Counter] ) )
-      {
-         sReturn[Counter] = sLine[Counter];
-         Counter++;
-      }
+         sReturn[0] = '\0';
+         s2[2]      = '\0';
 
-      sReturn[Counter] = '\0';
-      goto Done;
-   }
-   else if( sLine[0] == '.' )
-   {
-      if( nLen >= 5 && sLine[4] == '.' )
-      {
-         if( toupper( sLine[1] ) == 'A' && toupper( sLine[2] ) == 'N' && toupper( sLine[3] ) == 'D' )
+         if( nLen >= 2 )
          {
-            sReturn[0] = '.';
-            sReturn[1] = 'A';
-            sReturn[2] = 'N';
-            sReturn[3] = 'D';
-            sReturn[4] = '.';
-            sReturn[5] = '\0';
+            s2[0] = sLine[0];
+            s2[1] = sLine[1];
 
+            if( strstr( "++\\--\\->\\:=\\==\\!=\\<>\\>=\\<=\\+=\\-=\\*=\\^=\\**\\/=\\%=\\??", (char*) s2 ) )
+            {
+               sReturn[0] = s2[0];
+               sReturn[1] = s2[1];
+               sReturn[2] = '\0';
+
+               goto Done;
+            }
+            else if( s2[0] == '[' && s2[1] == '[' )
+            {
+               pTmp = strstr( sLine + 2, "]]" );
+               if( pTmp == NULL )
+               {
+                  sReturn[0] = '['; // Clipper does NOT consider '[[' a single token
+                  sReturn[1] = '\0';
+               }
+               else
+               {
+                  strncpy( sReturn, sLine, ( pTmp - sLine ) + 2 );
+                  sReturn[( pTmp - sLine ) + 2] = '\0';
+               }
+
+               goto Done;
+            }
+         }
+
+         if( isalpha( sLine[0] ) || sLine[0] == '_' )
+         {
+            sReturn[0] = sLine[0];
+            Counter = 1;
+            while( isalnum( sLine[Counter] ) || sLine[Counter] == '_' || sLine[Counter] == '\\' )
+            {
+               sReturn[Counter] = sLine[Counter];
+               Counter++;
+            }
+
+            sReturn[Counter] = '\0';
             goto Done;
          }
-         else if( toupper( sLine[1] ) == 'N' && toupper( sLine[2] ) == 'O' && toupper( sLine[3] ) == 'T' )
+         else if( isdigit( sLine[0] ) )
          {
-            sReturn[0] = '!';
+            sReturn[0] = sLine[0];
+            Counter = 1;
+            while( isdigit( sLine[Counter] ) || sLine[Counter] == '\\' )
+            {
+               sReturn[Counter] = sLine[Counter];
+               Counter++;
+            }
+
+            // Consume the point (and subsequent digits) only if digits follow...
+            if( sLine[Counter] == '.' && isdigit( sLine[Counter + 1] ) )
+            {
+               sReturn[Counter] = '.';
+               Counter++;
+               sReturn[Counter] = sLine[Counter];
+               Counter++;
+               while( isdigit( sLine[Counter] ) || sLine[Counter] == '\\' )
+               {
+                  sReturn[Counter] = sLine[Counter];
+                  Counter++;
+               }
+            }
+
+            // Either way we are done.
+            sReturn[Counter] = '\0';
+            goto Done;
+         }
+         else if( sLine[0] == '.' && isdigit( sLine[1] ) )
+         {
+            sReturn[0] = '.';
+            sReturn[1] = sLine[1];
+            Counter = 2;
+            while( isdigit( sLine[Counter] ) )
+            {
+               sReturn[Counter] = sLine[Counter];
+               Counter++;
+            }
+
+            sReturn[Counter] = '\0';
+            goto Done;
+         }
+         else if( sLine[0] == '.' )
+         {
+            if( nLen >= 5 && sLine[4] == '.' )
+            {
+               if( toupper( sLine[1] ) == 'A' && toupper( sLine[2] ) == 'N' && toupper( sLine[3] ) == 'D' )
+               {
+                  sReturn[0] = '.';
+                  sReturn[1] = 'A';
+                  sReturn[2] = 'N';
+                  sReturn[3] = 'D';
+                  sReturn[4] = '.';
+                  sReturn[5] = '\0';
+
+                  goto Done;
+               }
+               else if( toupper( sLine[1] ) == 'N' && toupper( sLine[2] ) == 'O' && toupper( sLine[3] ) == 'T' )
+               {
+                  sReturn[0] = '!';
+                  sReturn[1] = '\0';
+
+                  /* Skip the unaccounted letters ( .NOT. <-> ! ) */
+                  sLine += 4;
+
+                  goto Done;
+               }
+            }
+
+            if( nLen >= 4 && sLine[3] == '.' && toupper( sLine[1] ) == 'O' && toupper( sLine[2] ) == 'R' )
+            {
+               sReturn[0] = '.';
+               sReturn[1] = 'O';
+               sReturn[2] = 'R';
+               sReturn[3] = '.';
+               sReturn[4] = '\0';
+
+               goto Done;
+            }
+
+            if( nLen >= 3 && sLine[2] == '.' )
+            {
+               if( toupper( sLine[1] ) == 'T' )
+               {
+                  sReturn[0] = '.';
+                  sReturn[1] = 'T';
+                  sReturn[2] = '.';
+                  sReturn[3] = '\0';
+
+                  goto Done;
+               }
+               else if( toupper( sLine[1] ) == 'F' )
+               {
+                  sReturn[0] = '.';
+                  sReturn[1] = 'F';
+                  sReturn[2] = '.';
+                  sReturn[3] = '\0';
+
+                  goto Done;
+               }
+            }
+
+            sReturn[0] = '.';
             sReturn[1] = '\0';
 
-            /* Skip the unaccounted letters ( .NOT. <-> ! ) */
-            sLine += 4;
-
             goto Done;
          }
-      }
-
-      if( nLen >= 4 && sLine[3] == '.' && toupper( sLine[1] ) == 'O' && toupper( sLine[2] ) == 'R' )
-      {
-         sReturn[0] = '.';
-         sReturn[1] = 'O';
-         sReturn[2] = 'R';
-         sReturn[3] = '.';
-         sReturn[4] = '\0';
-
-         goto Done;
-      }
-
-      if( nLen >= 3 && sLine[2] == '.' )
-      {
-         if( toupper( sLine[1] ) == 'T' )
+         else if( sLine[0] == '"' )
          {
-            sReturn[0] = '.';
-            sReturn[1] = 'T';
-            sReturn[2] = '.';
-            sReturn[3] = '\0';
-
-            goto Done;
-         }
-         else if( toupper( sLine[1] ) == 'F' )
-         {
-            sReturn[0] = '.';
-            sReturn[1] = 'F';
-            sReturn[2] = '.';
-            sReturn[3] = '\0';
-
-            goto Done;
-         }
-      }
-
-      sReturn[0] = '.';
-      sReturn[1] = '\0';
-
-      goto Done;
-   }
-   else if( sLine[0] == '"' )
-   {
-      pTmp = strchr( sLine + 1, '"' );
-      if( pTmp == NULL )
-      {
-         sReturn[0] = '"';
-         sReturn[1] = '\0';
-      }
-      else
-      {
-         strncpy( sReturn, sLine, ( pTmp - sLine ) + 1 );
-         sReturn[( pTmp - sLine ) + 1] = '\0';
-      }
-
-      goto Done;
-   }
-   else if( sLine[0] == '\'' )
-   {
-      pTmp = strchr( sLine + 1, '\'' );
-      if( pTmp == NULL )
-      {
-         sReturn[0] = '\'';
-         sReturn[1] = '\0';
-      }
-      else
-      {
-         strncpy( sReturn, sLine, ( pTmp - sLine ) + 1 );
-         sReturn[( pTmp - sLine ) + 1] = '\0';
-
-         if( strchr( sReturn, '"' ) == NULL )
-         {
-            sReturn[0] = '"';
-            sReturn[( pTmp - sLine )] = '"';
-         }
-      }
-
-      goto Done;
-   }
-   else if( sLine[0] == '[' )
-   {
-      if( s_bArrayPrefix )
-      {
-         sReturn[0] = '[';
-         sReturn[1] = '\0';
-      }
-      else
-      {
-         pTmp = strchr( sLine + 1, ']' );
-         if( pTmp == NULL )
-         {
-            sReturn[0] = '[';
-            sReturn[1] = '\0';
-         }
-         else
-         {
-            strncpy( sReturn, sLine, ( pTmp - sLine ) + 1 );
-            sReturn[( pTmp - sLine ) + 1] = '\0';
-
-            if( strchr( sReturn, '"' ) == NULL )
+            pTmp = strchr( sLine + 1, '"' );
+            if( pTmp == NULL )
             {
                sReturn[0] = '"';
-               sReturn[( pTmp - sLine )] = '"';
+               sReturn[1] = '\0';
             }
-            else if( strchr( sReturn, '\'' ) == NULL )
+            else
+            {
+               strncpy( sReturn, sLine, ( pTmp - sLine ) + 1 );
+               sReturn[( pTmp - sLine ) + 1] = '\0';
+            }
+
+            goto Done;
+         }
+         else if( sLine[0] == '\'' )
+         {
+            pTmp = strchr( sLine + 1, '\'' );
+            if( pTmp == NULL )
             {
                sReturn[0] = '\'';
-               sReturn[( pTmp - sLine )] = '\'';
+               sReturn[1] = '\0';
+            }
+            else
+            {
+               strncpy( sReturn, sLine, ( pTmp - sLine ) + 1 );
+               sReturn[( pTmp - sLine ) + 1] = '\0';
+
+               if( strchr( sReturn, '"' ) == NULL )
+               {
+                  sReturn[0] = '"';
+                  sReturn[( pTmp - sLine )] = '"';
+               }
+            }
+
+            goto Done;
+         }
+         else if( sLine[0] == '[' )
+         {
+            if( s_bArrayPrefix )
+            {
+               sReturn[0] = '[';
+               sReturn[1] = '\0';
+            }
+            else
+            {
+               pTmp = strchr( sLine + 1, ']' );
+               if( pTmp == NULL )
+               {
+                  sReturn[0] = '[';
+                  sReturn[1] = '\0';
+               }
+               else
+               {
+                  strncpy( sReturn, sLine, ( pTmp - sLine ) + 1 );
+                  sReturn[( pTmp - sLine ) + 1] = '\0';
+
+                  if( strchr( sReturn, '"' ) == NULL )
+                  {
+                     sReturn[0] = '"';
+                     sReturn[( pTmp - sLine )] = '"';
+                  }
+                  else if( strchr( sReturn, '\'' ) == NULL )
+                  {
+                     sReturn[0] = '\'';
+                     sReturn[( pTmp - sLine )] = '\'';
+                  }
+               }
+            }
+
+            goto Done;
+         }
+         else if( sLine[0] == '\\' )
+         {
+            sReturn[0] = '\\';
+            sReturn[1] = sLine[1];
+            sReturn[2] = '\0';
+
+            goto Done;
+         }
+         else if ( strchr( "+-*/:=^!&()[]{}@,|<>#%?$~", sLine[0] ) )
+         {
+            sReturn[0] = sLine[0];
+            sReturn[1] = '\0';
+
+            goto Done;
+         }
+         else
+         {
+            // Todo Generic Error.
+            //printf( "\nUnexpected case: %s\n", sLine );
+            //getchar();
+            sReturn[0] = sLine[0];
+            sReturn[1] = '\0';
+         }
+
+       Done:
+
+         sLine += ( nLen = strlen( sReturn ) );
+
+         if( ! lDontRecord )
+         {
+            if( sReturn[0] == '.' && nLen > 1 && sReturn[nLen - 1] == '.' )
+            {
+               s_bArrayPrefix = FALSE;
+            }
+            else
+            {
+               s_bArrayPrefix = ( isalnum( sReturn[0] ) || strchr( "])}._", sReturn[0] ) );
             }
          }
+
+         while( sLine[0] == ' ' )
+         {
+            sReturn[nLen] = sLine[0];
+            sLine++; nLen++;
+         }
+         sReturn[nLen] = '\0';
+
+         if( ISBYREF( 1 ) )
+         {
+            if( sLine[0] == '\0' )
+            {
+               hb_itemPutC( pLine, NULL );
+            }
+            else
+            {
+               hb_itemPutCPtr( pLine, hb_strdup( sLine ), strlen( sLine ) );
+            }
+            //printf( "\nToken: '%s' value: '%s'\n", sReturn, pLine->item.asString.value );
+         }
+         else
+         {
+            //printf( "\nToken: '%s' ***value: '%s'\n", sReturn, pLine->item.asString.value );
+         }
+
+         //printf( "\nToken: '%s'\n", sReturn );
+
+         hb_retclen( sReturn, nLen );
       }
 
-      goto Done;
-   }
-   else if( sLine[0] == '\\' )
-   {
-      sReturn[0] = '\\';
-      sReturn[1] = sLine[1];
-      sReturn[2] = '\0';
-
-      goto Done;
-   }
-   else if ( strchr( "+-*/:=^!&()[]{}@,|<>#%?$~", sLine[0] ) )
-   {
-      sReturn[0] = sLine[0];
-      sReturn[1] = '\0';
-
-      goto Done;
-   }
-   else
-   {
-      printf( "\nUnexpected case: %s\n", sLine );
-      getchar();
-      sReturn[0] = sLine[0];
-      sReturn[1] = '\0';
-   }
-
- Done:
-
-   sLine += ( nLen = strlen( sReturn ) );
-
-   if( ! lDontRecord )
-   {
-      if( sReturn[0] == '.' && nLen > 1 && sReturn[nLen - 1] == '.' )
+      //----------------------------------------------------------------------------//
+      static HB_FUNC( NEXTIDENTIFIER )
       {
-         s_bArrayPrefix = FALSE;
-      }
-      else
-      {
-         s_bArrayPrefix = ( isalnum( sReturn[0] ) || strchr( "])}._", sReturn[0] ) );
-      }
-   }
+         PHB_ITEM pLine    = hb_param( 1, HB_IT_STRING );
+         PHB_ITEM pSkipped = hb_param( 2, HB_IT_ANY );
+         char *sLine;
+         char cChar, cLastChar = ' ';
+         size_t nAt, nLen;
+         int nStart = -1;
 
-   while( sLine[0] == ' ' )
-   {
-      sReturn[nLen] = sLine[0];
-      sLine++; nLen++;
-   }
-   sReturn[nLen] = '\0';
+         if( pLine == NULL || pLine->item.asString.length == 0 )
+         {
+            hb_ret();
+         }
 
-   if( ISBYREF( 1 ) )
-   {
-      if( sLine[0] == '\0' )
-      {
-         hb_itemPutC( pLine, NULL );
-      }
-      else
-      {
-         hb_itemPutCPtr( pLine, hb_strdup( sLine ), strlen( sLine ) );
-      }
-      //printf( "\nToken: '%s' value: '%s'\n", sReturn, pLine->item.asString.value );
-   }
-   else
-   {
-      //printf( "\nToken: '%s' ***value: '%s'\n", sReturn, pLine->item.asString.value );
-   }
+         sLine = pLine->item.asString.value;
+         nLen  = pLine->item.asString.length;
 
-   //printf( "\nToken: '%s'\n", sReturn );
+         for( nAt = 0; nAt < nLen; nAt++ )
+         {
+             cChar = sLine[nAt];
 
-   hb_retclen( sReturn, nLen );
-}
+             if( strchr( " ,([{|^*/+-=!#<>:&$", cChar ) )
+             {
+                if( nStart >= 0 )
+                {
+                   break;
+                }
+                continue; // No need to record cLastChar
+             }
+             else if( strchr( ")]}", cChar ) )
+             {
+                if( nStart >= 0 )
+                {
+                   break;
+                }
+             }
+             else if( strchr( "\"'", cChar ) )
+             {
+                while( ( nAt < nLen ) && ( sLine[++nAt] != cChar ) );
 
-//----------------------------------------------------------------------------//
-static HB_FUNC( NEXTIDENTIFIER )
-{
-   PHB_ITEM pLine    = hb_param( 1, HB_IT_STRING );
-   PHB_ITEM pSkipped = hb_param( 2, HB_IT_ANY );
-   char *sLine;
-   char cChar, cLastChar = ' ';
-   size_t nAt, nLen;
-   int nStart = -1;
+                continue; // No need to record cLastChar
+             }
+             else if( cChar == '[' )
+             {
+                if( ! ( isalnum( cLastChar ) || strchr( "])}_.", cLastChar ) ) )
+                {
+                   while( nAt < nLen && sLine[++nAt] != ']' );
+                }
+                cLastChar = ']';
 
-   if( pLine == NULL || pLine->item.asString.length == 0 )
-   {
-      hb_ret();
-   }
+                continue; // Recorded cLastChar
+             }
+             else if( cChar == '.' )
+             {
+                if( nStart >= 0 )
+                {
+                   break;
+                }
+                else if( toupper( sLine[nAt + 1] ) == 'T' && sLine[nAt + 2] == '.' )
+                {
+                   nAt += 2;
+                   continue;
+                }
+                else if( toupper( sLine[nAt + 1] ) == 'F' && sLine[nAt + 2] == '.' )
+                {
+                   nAt += 2;
+                   continue;
+                }
+                else if( toupper( sLine[nAt + 1] ) == 'O' && toupper( sLine[nAt + 2] ) == 'R' && sLine[nAt + 3] == '.' )
+                {
+                   nAt += 3;
+                   continue;
+                }
+                else if( toupper( sLine[nAt + 1] ) == 'A' && toupper( sLine[nAt + 2] ) == 'N' && toupper( sLine[nAt + 3] ) == 'D' && sLine[nAt + 4] == '.' )
+                {
+                   nAt += 4;
+                   continue;
+                }
+                else if( toupper( sLine[nAt + 1] ) == 'N' && toupper( sLine[nAt + 2] ) == 'O' && toupper( sLine[nAt + 3] ) == 'T' && sLine[nAt + 4] == '.' )
+                {
+                   nAt += 4;
+                   continue;
+                }
+             }
+             else if( nStart == -1 && ( isalpha( cChar ) || cChar == '_' ) )
+             {
+                nStart = nAt;
+             }
 
-   sLine = pLine->item.asString.value;
-   nLen  = pLine->item.asString.length;
+             cLastChar = cChar;
+          }
 
-   for( nAt = 0; nAt < nLen; nAt++ )
-   {
-       cChar = sLine[nAt];
+          if( ISBYREF( 2 ) )
+          {
+             if( nStart <= 0 )
+             {
+                hb_itemPutC( pSkipped, NULL );
+                //printf( "\nNot Skipped: \n" );
+             }
+             else
+             {
+                hb_itemPutCL( pSkipped, sLine, nStart );
+                //printf( "\nSkipped: '%s'\n", pSkipped->item.asString.value );
+             }
+          }
 
-       if( strchr( " ,([{|^*/+-=!#<>:&$", cChar ) )
-       {
           if( nStart >= 0 )
           {
-             break;
+             char *sIdentifier = (char *) hb_xgrab( ( nAt - nStart ) + 1 );
+
+             strncpy( sIdentifier, sLine + nStart, ( nAt - nStart ) );
+             sIdentifier[nAt - nStart] = '\0';
+
+             //printf( "\nLine: '%s' nStart: %i nAt: %i sIdentifier: '%s'\n", sLine, nStart, nAt, sIdentifier );
+
+             if( ISBYREF( 1 ) )
+             {
+                hb_itemPutCPtr( pLine, hb_strdup( sLine + nAt ), strlen( sLine + nAt ) );
+             }
+
+             //printf( "\nIdentifier: '%s'\n", sIdentifier );
+
+             #ifdef __XHARBOUR__
+                hb_retcAdopt( sIdentifier );
+             #else
+                hb_retc( sIdentifier );
+                hb_xfree( sIdentifier );
+             #endif
           }
-          continue; // No need to record cLastChar
-       }
-       else if( strchr( ")]}", cChar ) )
-       {
-          if( nStart >= 0 )
+          else
           {
-             break;
+             hb_ret();
           }
-       }
-       else if( strchr( "\"'", cChar ) )
-       {
-          while( ( nAt < nLen ) && ( sLine[++nAt] != cChar ) );
-
-          continue; // No need to record cLastChar
-       }
-       else if( cChar == '[' )
-       {
-          if( ! ( isalnum( cLastChar ) || strchr( "])}_.", cLastChar ) ) )
-          {
-             while( nAt < nLen && sLine[++nAt] != ']' );
-          }
-          cLastChar = ']';
-
-          continue; // Recorded cLastChar
-       }
-       else if( cChar == '.' )
-       {
-          if( nStart >= 0 )
-          {
-             break;
-          }
-          else if( toupper( sLine[nAt + 1] ) == 'T' && sLine[nAt + 2] == '.' )
-          {
-             nAt += 2;
-             continue;
-          }
-          else if( toupper( sLine[nAt + 1] ) == 'F' && sLine[nAt + 2] == '.' )
-          {
-             nAt += 2;
-             continue;
-          }
-          else if( toupper( sLine[nAt + 1] ) == 'O' && toupper( sLine[nAt + 2] ) == 'R' && sLine[nAt + 3] == '.' )
-          {
-             nAt += 3;
-             continue;
-          }
-          else if( toupper( sLine[nAt + 1] ) == 'A' && toupper( sLine[nAt + 2] ) == 'N' && toupper( sLine[nAt + 3] ) == 'D' && sLine[nAt + 4] == '.' )
-          {
-             nAt += 4;
-             continue;
-          }
-          else if( toupper( sLine[nAt + 1] ) == 'N' && toupper( sLine[nAt + 2] ) == 'O' && toupper( sLine[nAt + 3] ) == 'T' && sLine[nAt + 4] == '.' )
-          {
-             nAt += 4;
-             continue;
-          }
-       }
-       else if( nStart == -1 && ( isalpha( cChar ) || cChar == '_' ) )
-       {
-          nStart = nAt;
-       }
-
-       cLastChar = cChar;
-    }
-
-    if( ISBYREF( 2 ) )
-    {
-       if( nStart <= 0 )
-       {
-          hb_itemPutC( pSkipped, NULL );
-          //printf( "\nNot Skipped: \n" );
-       }
-       else
-       {
-          hb_itemPutCL( pSkipped, sLine, nStart );
-          //printf( "\nSkipped: '%s'\n", pSkipped->item.asString.value );
-       }
-    }
-
-    if( nStart >= 0 )
-    {
-       char *sIdentifier = (char *) hb_xgrab( ( nAt - nStart ) + 1 );
-
-       strncpy( sIdentifier, sLine + nStart, ( nAt - nStart ) );
-       sIdentifier[nAt - nStart] = '\0';
-
-       //printf( "\nLine: '%s' nStart: %i nAt: %i sIdentifier: '%s'\n", sLine, nStart, nAt, sIdentifier );
-
-       if( ISBYREF( 1 ) )
-       {
-          hb_itemPutCPtr( pLine, hb_strdup( sLine + nAt ), strlen( sLine + nAt ) );
-       }
-
-       //printf( "\nIdentifier: '%s'\n", sIdentifier );
-
-       #ifdef __XHARBOUR__
-          hb_retcAdopt( sIdentifier );
-       #else
-          hb_retc( sIdentifier );
-          hb_xfree( sIdentifier );
-       #endif
-    }
-    else
-    {
-       hb_ret();
-    }
-}
-
-//----------------------------------------------------------------------------//
-HB_FUNC( EXTRACTLEADINGWS )
-{
-   PHB_ITEM pLine = hb_param( 1, HB_IT_STRING );
-   size_t iLen, i = 0;
-   char *pTmp;
-
-   if( pLine == NULL )
-   {
-      hb_retclen( "", 0 );
-      return;
-   }
-
-   iLen = pLine->item.asString.length;
-
-   while( pLine->item.asString.value[i] == ' ' )
-   {
-      i++;
-   }
-
-   if( i > 0 )
-   {
-      if( HB_IS_BYREF( * ( hb_stack.pBase + 1 + 1 ) ) )
-      {
-         hb_itemPutCPtr( pLine, hb_strdup( pLine->item.asString.value + i ), iLen - i );
       }
-   }
-
-   pTmp = ( char * ) hb_xgrab( i + 1 );
-   memset( pTmp, ' ', i );
-
-   if( HB_IS_BYREF( * ( hb_stack.pBase + 2 + 1 ) ) )
-   {
-      PHB_ITEM pWS = hb_itemUnRef( * ( hb_stack.pBase + 2 + 1 ) );
-      hb_itemPutCL( pWS, pTmp, i );
-   }
-
-   #ifdef __XHARBOUR__
-      hb_retclenAdopt( pTmp, i );
-   #else
-      hb_retclen_buffer( pTmp, i );
-   #endif
-}
-
-//----------------------------------------------------------------------------//
-HB_FUNC( DROPTRAILINGWS )
-{
-   PHB_ITEM pLine = hb_param( 1, HB_IT_STRING );
-   char *pString;
-   size_t iLen, i;
-
-   if( pLine == NULL )
-   {
-      hb_retclen( "", 0 );
-      return;
-   }
-
-   pString = hb_itemGetC( pLine );
-   iLen    = hb_itemGetCLen( pLine );
-
-   i = iLen - 1;
-
-   while( pString[i] == ' ' )
-   {
-      i--;
-   }
 
-   if( ++i < iLen )
-   {
-      pString[i] = '\0';
-   }
-
-   if( HB_IS_BYREF( * ( hb_stack.pBase + 1 + 1 ) ) )
-   {
-      hb_itemPutCL( pLine, pString, i );
-   }
-
-   if( HB_IS_BYREF( * ( hb_stack.pBase + 2 + 1 ) ) )
-   {
-      PHB_ITEM pWS = hb_itemUnRef( * ( hb_stack.pBase + 2 + 1 ) );
-      char *pTmp = ( char * ) hb_xgrab( iLen - i + 1 );
-
-      memset( pTmp, ' ', iLen - i );
-      hb_itemPutCPtr( pWS, pTmp, iLen - i );
-   }
-
-   #ifdef __XHARBOUR__
-      hb_retclenAdopt( pString, i );
-   #else
-      hb_retclen_buffer( pString, i );
-   #endif
-}
+      //----------------------------------------------------------------------------//
+      HB_FUNC( EXTRACTLEADINGWS )
+      {
+         PHB_ITEM pLine = hb_param( 1, HB_IT_STRING );
+         size_t iLen, i = 0;
+         char *pTmp;
+
+         if( pLine == NULL )
+         {
+            hb_retclen( "", 0 );
+            return;
+         }
+
+         iLen = pLine->item.asString.length;
+
+         while( pLine->item.asString.value[i] == ' ' )
+         {
+            i++;
+         }
+
+         if( i > 0 )
+         {
+            if( HB_IS_BYREF( * ( hb_stack.pBase + 1 + 1 ) ) )
+            {
+               hb_itemPutCPtr( pLine, hb_strdup( pLine->item.asString.value + i ), iLen - i );
+            }
+         }
+
+         pTmp = ( char * ) hb_xgrab( i + 1 );
+         memset( pTmp, ' ', i );
+
+         if( HB_IS_BYREF( * ( hb_stack.pBase + 2 + 1 ) ) )
+         {
+            PHB_ITEM pWS = hb_itemUnRef( * ( hb_stack.pBase + 2 + 1 ) );
+            hb_itemPutCL( pWS, pTmp, i );
+         }
+
+         #ifdef __XHARBOUR__
+            hb_retclenAdopt( pTmp, i );
+         #else
+            hb_retclen_buffer( pTmp, i );
+         #endif
+      }
+
+      //----------------------------------------------------------------------------//
+      HB_FUNC( DROPTRAILINGWS )
+      {
+         PHB_ITEM pLine = hb_param( 1, HB_IT_STRING );
+         char *pString;
+         size_t iLen, i;
+
+         if( pLine == NULL )
+         {
+            hb_retclen( "", 0 );
+            return;
+         }
+
+         pString = hb_itemGetC( pLine );
+         iLen    = hb_itemGetCLen( pLine );
+
+         i = iLen - 1;
+
+         while( pString[i] == ' ' )
+         {
+            i--;
+         }
+
+         if( ++i < iLen )
+         {
+            pString[i] = '\0';
+         }
+
+         if( HB_IS_BYREF( * ( hb_stack.pBase + 1 + 1 ) ) )
+         {
+            hb_itemPutCL( pLine, pString, i );
+         }
+
+         if( HB_IS_BYREF( * ( hb_stack.pBase + 2 + 1 ) ) )
+         {
+            PHB_ITEM pWS = hb_itemUnRef( * ( hb_stack.pBase + 2 + 1 ) );
+            char *pTmp = ( char * ) hb_xgrab( iLen - i + 1 );
+
+            memset( pTmp, ' ', iLen - i );
+            hb_itemPutCPtr( pWS, pTmp, iLen - i );
+         }
+
+         #ifdef __XHARBOUR__
+            hb_retclenAdopt( pString, i );
+         #else
+            hb_retclen_buffer( pString, i );
+         #endif
+      }
+
+      //----------------------------------------------------------------------------//
+      HB_FUNC( DROPEXTRATRAILINGWS )
+      {
+         PHB_ITEM pLine = hb_param( 1, HB_IT_STRING );
+         char *pString;
+         size_t iLen, i;
+
+         if( pLine == NULL )
+         {
+            hb_retclen( "", 0 );
+            return;
+         }
 
-//----------------------------------------------------------------------------//
-HB_FUNC( DROPEXTRATRAILINGWS )
-{
-   PHB_ITEM pLine = hb_param( 1, HB_IT_STRING );
-   char *pString;
-   size_t iLen, i;
+         pString = hb_itemGetC( pLine );
+         iLen    = hb_itemGetCLen( pLine );
 
-   if( pLine == NULL )
-   {
-      hb_retclen( "", 0 );
-      return;
-   }
+         i = iLen - 1;
 
-   pString = hb_itemGetC( pLine );
-   iLen    = hb_itemGetCLen( pLine );
+         while( i > 1 && pString[i] == ' ' && pString[i - 1] == ' ' )
+         {
+            i--;
+         }
 
-   i = iLen - 1;
+         if( ++i < iLen )
+         {
+            pString[i] = '\0';
+         }
 
-   while( i > 1 && pString[i] == ' ' && pString[i - 1] == ' ' )
-   {
-      i--;
-   }
-
-   if( ++i < iLen )
-   {
-      pString[i] = '\0';
-   }
-
-   if( HB_IS_BYREF( * ( hb_stack.pBase + 1 + 1 ) ) )
-   {
-      hb_itemPutCL( pLine, pString, i );
-   }
-
-   #ifdef __XHARBOUR__
-      hb_retclenAdopt( pString, i );
-   #else
-      hb_retclen_buffer( pString, i );
-   #endif
-}
+         if( HB_IS_BYREF( * ( hb_stack.pBase + 1 + 1 ) ) )
+         {
+            hb_itemPutCL( pLine, pString, i );
+         }
 
-#pragma ENDDUMP
+         #ifdef __XHARBOUR__
+            hb_retclenAdopt( pString, i );
+         #else
+            hb_retclen_buffer( pString, i );
+         #endif
+      }
 
-//----------------------------------------------------------------------------//
+    #pragma ENDDUMP
 
-#ifdef WIN
+  #endif
 
-FUNCTION Alert( cMsg, aOptions )
+  //----------------------------------------------------------------------------//
 
-RETURN MessageBox( 0, cMsg, "XBScript", 0 );
+  #ifdef WIN
 
-//----------------------------------------------------------------------------//
+    FUNCTION Alert( cMsg, aOptions )
 
-CLASS TOleAuto
+    RETURN MessageBox( 0, CStr( cMsg ), "XBScript", 0 )
 
-   DATA hObj
-   DATA cClassName
-   DATA bShowException INIT .T.
+ #endif
 
-   METHOD New( uObj, cClass ) CONSTRUCTOR
-   METHOD End()
-
-   METHOD Invoke( cMember, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-   METHOD Set( cProperty, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-   METHOD Get( cProperty, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-
-   ERROR HANDLER OnError( cMsg, nError )
-
-ENDCLASS
-
-//--------------------------------------------------------------------
-
-METHOD New( uObj, cClass ) CLASS TOleAuto
-
-   IF ValType( uObj ) = 'C'
-      ::hObj := CreateOleObject( uObj )
-      ::cClassName := uObj
-   ELSEIF ValType( uObj ) = 'N'
-      ::hObj := uObj
-      IF ValType( cClass ) == 'C'
-         ::cClassName := cClass
-      ELSE
-         ::cClassName := LTrim( Str( uObj ) )
-      ENDIF
-   ELSE
-      Alert( "Invalid parameter type to constructor TOleAuto():New()!" )
-      ::hObj := 0
-   ENDIF
-
-RETURN Self
-
-//--------------------------------------------------------------------
-
-METHOD End() CLASS TOleAuto
-
-   ::hObj := NIL
-
-   OLEUninitialize()
-
-RETURN NIL
-
-//--------------------------------------------------------------------
-
-METHOD Invoke( cMethod, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 ) CLASS TOleAuto
-
-   LOCAL uObj
-
-   IF uParam6 != NIL
-      uObj := OLEInvoke( ::hObj, cMethod, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-   ELSEIF uParam5 != NIL
-      uObj := OLEInvoke( ::hObj, cMethod, uParam1, uParam2, uParam3, uParam4, uParam5 )
-   ELSEIF uParam4 != NIL
-      uObj := OLEInvoke( ::hObj, cMethod, uParam1, uParam2, uParam3, uParam4 )
-   ELSEIF uParam3 != NIL
-      uObj := OLEInvoke( ::hObj, cMethod, uParam1, uParam2, uParam3 )
-   ELSEIF uParam2 != NIL
-      uObj := OLEInvoke( ::hObj, cMethod, uParam1, uParam2 )
-   ELSEIF uParam1 != NIL
-      uObj := OLEInvoke( ::hObj, cMethod, uParam1 )
-   ELSE
-      uObj := OLEInvoke( ::hObj, cMethod )
-   ENDIF
-
-   IF OleIsObject()
-      RETURN TOleAuto():New( uObj )
-   ELSEIF ::bShowException .AND. Ole2TxtError() == "DISP_E_EXCEPTION"
-      OLEShowException()
-      RETURN Self
-   ELSEIF ::bShowException .AND. OleError() != 0
-      Alert( "Error! " + ::cClassName + ":" + cMethod + " " + Ole2TxtError() )
-   ENDIF
-
-RETURN uObj
-
-//--------------------------------------------------------------------
-
-METHOD Set( cProperty, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 ) CLASS TOleAuto
-
-   LOCAL uObj
-
-   IF uParam6 != NIL
-      OLESetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-   ELSEIF uParam5 != NIL
-      OLESetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3, uParam4, uParam5 )
-   ELSEIF uParam4 != NIL
-      OLESetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3, uParam4 )
-   ELSEIF uParam3 != NIL
-      OLESetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3 )
-   ELSEIF uParam2 != NIL
-      OLESetProperty( ::hObj, cProperty, uParam1, uParam2 )
-   ELSEIF uParam1 != NIL
-      OLESetProperty( ::hObj, cProperty, uParam1 )
-   ENDIF
-
-   IF ::bShowException .AND. Ole2TxtError() == "DISP_E_EXCEPTION"
-      OLEShowException()
-   ELSEIF ::bShowException .AND. OleError() != 0
-      Alert( "Error! " + ::cClassName + ":" + cProperty + " " + Ole2TxtError() )
-   ENDIF
-
-RETURN nil
-
-//--------------------------------------------------------------------
-
-METHOD Get( cProperty, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 ) CLASS TOleAuto
-
-   LOCAL uObj
-
-   IF uParam6 != NIL
-      uObj := OLEGetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-   ELSEIF uParam5 != NIL
-      uObj := OLEGetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3, uParam4, uParam5 )
-   ELSEIF uParam4 != NIL
-      uObj := OLEGetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3, uParam4 )
-   ELSEIF uParam3 != NIL
-      uObj := OLEGetProperty( ::hObj, cProperty, uParam1, uParam2, uParam3 )
-   ELSEIF uParam2 != NIL
-      uObj := OLEGetProperty( ::hObj, cProperty, uParam1, uParam2 )
-   ELSEIF uParam1 != NIL
-      uObj := OLEGetProperty( ::hObj, cProperty, uParam1 )
-   ELSE
-      uObj := OLEGetProperty( ::hObj, cProperty )
-   ENDIF
-
-   IF OleIsObject()
-      RETURN TOleAuto():New( uObj )
-   ELSEIF ::bShowException .AND. OleError() != 0
-      Alert( "Error! " + ::cClassName + ":" + cProperty + " " + Ole2TxtError() )
-   ENDIF
-
-RETURN uObj
-
-//--------------------------------------------------------------------
-
-METHOD OnError( uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 ) CLASS TOleAuto
-
-   LOCAL cMsg := __GetMessage()
-   LOCAL bPresetShowException := ::bShowException
-   LOCAL uObj
-   LOCAL cError
-
-   //TraceLog( cMsg, PCount() )
-
-   IF LEFT( cMsg, 1 ) == '_'
-      ::Set( SUBS( cMsg, 2 ), uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-   ELSE
-      ::bShowException := .F.
-      uObj := ::Invoke( cMsg, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-      IF Ole2TxtError() != "S_OK"
-         uObj := ::Get( cMsg, uParam1, uParam2, uParam3, uParam4, uParam5, uParam6 )
-      ENDIF
-      ::bShowException := bPresetShowException
-   ENDIF
-
-   IF ::bShowException .AND. ( cError := Ole2TxtError() ) != "S_OK"
-      Alert( "Error! " + ::cClassName + ":" + cMsg + " " + cError )
-   ENDIF
-
-RETURN uObj
-
-//--------------------------------------------------------------------
-#ifdef WIN
-
-#pragma BEGINDUMP
-
-        #define __STDC__ 1
-        #define CINTERFACE 1
-
-        #ifndef __FLAT__
-          #define __FLAT__ 1
-        #endif
-
-	#include <Windows.h>
-	#include <Ole2.h>
-
-	#include <OleAuto.h>
-	#include <OleDB.h>
-	#include <ShlObj.h>
-
-	//#include <extend.h>
-	//#include <HBdate.h>
-	//#include <HBvm.h>
-
-	#include <ctype.h>
-	#include "hbapi.h"
-	#include "hbstack.h"
-	#include "hbapierr.h"
-	#include "hbapiitm.h"
-	#include "hbvm.h"
-	#include "hboo.ch"
-	#include "HBdate.h"
-
-	#undef  WORD
-	#define WORD        unsigned short
-
-	// -----------------------------------------------------------------------
-
-	//extern void pascal _pushstring( char * cParam );
-	//extern void pascal _pushint( int lParam );
-	//extern void pascal _pushdouble( double ndParam );
-
-	static far VARIANTARG RetVal;
-
-	static EXCEPINFO excep;
-
-	static HRESULT nOleError = 0;
-
-	static int nInitialized = 0;
-
-	//---------------------------------------------------------------------------//
-
-	static double DateToDbl( LPSTR cDate )
-	{
-	   double nDate;
-
-	   nDate = hb_dateEncStr( cDate ) - 0x0024d9abL;
-
-	   return ( nDate );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	static LPSTR DblToDate( double nDate )
-	{
-	   static char *cDate = "00000000";
-
-	   hb_dateDecStr( cDate, (long) nDate + 0x0024d9abL );
-
-	   return ( cDate );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	static LPSTR AnsiToWide( LPSTR cAnsi )
-	{
-	   WORD wLen;
-	   LPSTR cString;
-
-	   wLen  = MultiByteToWideChar( CP_ACP, MB_PRECOMPOSED, cAnsi, -1, 0, 0 );
-	   cString = ( char * ) hb_xgrab( wLen * 2 );
-	   MultiByteToWideChar( CP_ACP, MB_PRECOMPOSED, cAnsi, -1, ( LPWSTR ) cString, wLen );
-
-	   return ( cString );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	static LPSTR WideToAnsi( LPSTR cWide )
-	{
-	   WORD wLen;
-	   LPSTR cString = NULL;
-
-	   wLen = WideCharToMultiByte( CP_ACP, 0, ( LPWSTR ) cWide, -1, cString, 0, NULL, NULL );
-	   cString = (char *) hb_xgrab( wLen );
-	   WideCharToMultiByte( CP_ACP, 0, ( LPWSTR ) cWide, -1, cString, wLen, NULL, NULL );
-
-	   return ( cString );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	static void GetParams(DISPPARAMS * dParams)
-	{
-	   VARIANTARG * pArgs = NULL;
-	   PHB_ITEM uParam;
-	   int n, nArgs, nArg;
-	   LPSTR cString;
-
-	   nArgs = hb_pcount() - 2;
-
-	   if( nArgs > 0 )
-	   {
-	      pArgs = ( VARIANTARG * ) hb_xgrab( sizeof( VARIANTARG ) * nArgs );
-
-	      for( n = 0; n < nArgs; n++ )
-	      {
-	         // Los parametros en VARIANTARG[] hay que ponerlos en orden inverso
-	         nArg = nArgs + 2 - n;
-
-	         VariantInit( &( pArgs[ n ] ) );
-
-	         uParam = hb_param( nArg, 0xFFFF );
-
-	         switch( uParam->type )
-	         {
-	            case HB_IT_NIL:
-	                 pArgs[ n ].n1.n2.vt   = VT_EMPTY;
-	                 break;
-
-	            case HB_IT_STRING:
-	            case HB_IT_MEMO:
-	                 pArgs[ n ].n1.n2.vt   = VT_BSTR;
-	                 cString = AnsiToWide( hb_parc( nArg ) );
-	                 pArgs[ n ].n1.n2.n3.bstrVal = SysAllocString( (const unsigned short *) cString );
-	                 hb_xfree( cString );
-	                 break;
-
-	            case HB_IT_LOGICAL:
-	                 pArgs[ n ].n1.n2.vt   = VT_BOOL;
-	                 pArgs[ n ].n1.n2.n3.boolVal = hb_parl( nArg );
-	                 break;
-
-	            case HB_IT_INTEGER:
-	            case HB_IT_LONG:
-	            case HB_IT_NUMERIC:
-	                 pArgs[ n ].n1.n2.vt   = VT_I4;
-	                 pArgs[ n ].n1.n2.n3.lVal = hb_parnl( nArg );
-	                 break;
-
-	            case HB_IT_DOUBLE:
-	                 pArgs[ n ].n1.n2.vt   = VT_R8;
-	                 pArgs[ n ].n1.n2.n3.dblVal = hb_parnd( nArg );
-	                 break;
-
-	            case HB_IT_DATE:
-	                 pArgs[ n ].n1.n2.vt   = VT_DATE;
-	                 pArgs[ n ].n1.n2.n3.dblVal = DateToDbl( hb_pards( nArg ) );
-	                 break;
-
-	            case HB_IT_OBJECT:
-	                 {
-	                 PHB_DYNS pData;
-	                 pArgs[ n ].n1.n2.vt = VT_EMPTY;
-	                 if ( hb_stricmp( hb_objGetClsName( uParam ), "TOleAuto" ) == 0 )
-	                    {
-	                    pData = hb_dynsymFindName( "hObj" );
-	                    if( pData )
-	                       {
-	                       hb_vmPush( uParam );
-	                       hb_vmPushSymbol( pData->pSymbol );
-	                       hb_vmDo( 0 );
-	                       pArgs[ n ].n1.n2.vt = VT_DISPATCH;
-	                       pArgs[ n ].n1.n2.n3.pdispVal = ( IDispatch * ) hb_parnl( -1 );
-	                       }
-	                    }
-	                 }
-	                 break;
-	         }
-	      }
-	   }
-
-	   dParams->rgvarg = pArgs;
-	   dParams->cArgs  = nArgs;
-	   dParams->rgdispidNamedArgs = 0;
-	   dParams->cNamedArgs = 0;
-
-	}
-
-	//---------------------------------------------------------------------------//
-
-	static void FreeParams(DISPPARAMS * dParams)
-	{
-	   int n;
-
-	   if( dParams->cArgs > 0 )
-	   {
-	      for( n = 0; n < ( int ) dParams->cArgs; n++ )
-	         VariantClear( &(dParams->rgvarg[ n ]) );
-
-	      hb_xfree( ( LPVOID ) dParams->rgvarg );
-	   }
-	}
-
-	//---------------------------------------------------------------------------//
-
-	static void RetValue( void )
-	{
-	   LPSTR cString;
-
-	   switch( RetVal.n1.n2.vt )
-	   {
-	      case VT_BSTR:
-	           cString = WideToAnsi( ( LPSTR ) RetVal.n1.n2.n3.bstrVal );
-	           hb_retc( cString );
-	           #ifdef __FLAT__
-	              hb_xfree( cString );
-	           #endif
-	           break;
-
-	      case VT_BOOL:
-	           hb_retl( RetVal.n1.n2.n3.boolVal );
-	           break;
-
-	      case VT_DISPATCH:
-	           hb_retnl( ( LONG ) RetVal.n1.n2.n3.pdispVal );
-	           break;
-
-	      case VT_I4:
-	           hb_retnl( ( LONG ) RetVal.n1.n2.n3.iVal );
-	           break;
-
-	      case VT_R8:
-	           hb_retnd( RetVal.n1.n2.n3.dblVal );
-	           break;
-
-	      case VT_DATE:
-	           hb_retds( DblToDate( RetVal.n1.n2.n3.dblVal ) );
-	           break;
-
-	      case VT_EMPTY:
-	           hb_ret();
-	           break;
-
-	      default:
-	           if ( nOleError == S_OK )
-	              (LONG) nOleError = -1;
-	           hb_ret();
-	           break;
-	   }
-
-	   if( RetVal.n1.n2.vt != VT_DISPATCH )
-	      VariantClear( &RetVal );
-
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( CREATEOLEOBJECT ) // ( cOleName | cCLSID  [, cIID ] )
-	{
-	   LPSTR cCLSID;
-	   GUID ClassID, iid;
-	   /*REFIID*/ struct _GUID *riid = (struct _GUID *) &IID_IDispatch;
-	   IDispatch * pDisp = NULL;
-
-	   nOleError = S_OK;
-
-	   if ( nInitialized == 0 )
-	      nOleError = OleInitialize( NULL );
-
-	   if ( (nOleError == S_OK) || (nOleError == (HRESULT) S_FALSE) )
-	      {
-	      nInitialized++;
-
-	      cCLSID = AnsiToWide( hb_parc( 1 ) );
-	      if ( hb_parc( 1 )[ 0 ] == '{' )
-	         nOleError = CLSIDFromString( ( LPOLESTR ) cCLSID, &ClassID );
-	      else
-	         nOleError = CLSIDFromProgID( ( LPCOLESTR ) cCLSID, &ClassID );
-
-	      hb_xfree( cCLSID );
-
-	      if ( hb_pcount() == 2 )
-	         {
-	         if ( hb_parc( 2 )[ 0 ] == '{' )
-	           {
-	            cCLSID = AnsiToWide( hb_parc( 2 ) );
-	            nOleError = CLSIDFromString( ( LPOLESTR ) cCLSID, &iid );
-	            hb_xfree( cCLSID );
-	            }
-	         else
-	            memcpy( ( LPVOID ) &iid, hb_parc( 2 ), sizeof( iid ) );
-
-	         riid = &iid;
-	         }
-
-	      if ( nOleError == S_OK )
-	         nOleError = CoCreateInstance( &ClassID, NULL, CLSCTX_SERVER, riid, (void **) &pDisp );
-	      }
-
-	   hb_retnl( ( LONG ) pDisp );
-
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HARBOUR HB_FUN_OLESHOWEXCEPTION()
-	{
-	   if ( (LONG) nOleError == DISP_E_EXCEPTION )
-	      {
-	         LPSTR source, description;
-
-	         source = WideToAnsi( (char *) excep.bstrSource );
-	         description = WideToAnsi( (char *) excep.bstrDescription );
-	         MessageBox( NULL, description, source, MB_ICONHAND );
-	         hb_xfree( source );
-	         hb_xfree( description );
-	      }
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HARBOUR HB_FUN_OLEINVOKE() // (hOleObject, szMethodName, uParams...)
-	{
-	   IDispatch * pDisp = ( IDispatch * ) hb_parnl( 1 );
-	   LPSTR cMember;
-	   DISPID lDispID;
-	   DISPPARAMS dParams;
-	   UINT uArgErr;
-
-	   VariantInit( &RetVal );
-	   memset( (LPBYTE) &excep, 0, sizeof( excep ) );
-
-	   cMember = AnsiToWide( hb_parc( 2 ) );
-	   nOleError = pDisp->lpVtbl->GetIDsOfNames( pDisp, &IID_NULL, (unsigned short **) &cMember, 1, LOCALE_USER_DEFAULT, &lDispID );
-	   hb_xfree( cMember );
-
-	   if ( nOleError == S_OK )
-	      {
-	      GetParams( &dParams );
-	      nOleError = pDisp->lpVtbl->Invoke( pDisp,
-	                                         lDispID,
-	                                         &IID_NULL,
-	                                         LOCALE_USER_DEFAULT,
-	                                         DISPATCH_METHOD,
-	                                         &dParams,
-	                                         &RetVal,
-	                                         &excep,
-	                                         &uArgErr ) ;
-	      FreeParams( &dParams );
-	      }
-
-	   RetValue();
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HARBOUR HB_FUN_OLESETPROPERTY() // (hOleObject, cPropName, uValue, uParams...)
-	{
-	   IDispatch * pDisp = ( IDispatch * ) hb_parnl( 1 );
-	   LPSTR cMember;
-	   DISPID lDispID, lPropPut = DISPID_PROPERTYPUT;
-	   DISPPARAMS dParams;
-	   UINT uArgErr;
-
-	   VariantInit( &RetVal );
-	   memset( (LPBYTE) &excep, 0, sizeof( excep ) );
-
-	   cMember = AnsiToWide( hb_parc( 2 ) );
-	   nOleError = pDisp->lpVtbl->GetIDsOfNames( pDisp, &IID_NULL, (unsigned short **) &cMember, 1, LOCALE_USER_DEFAULT, &lDispID );
-	   hb_xfree( cMember );
-
-	   if ( nOleError == S_OK )
-	      {
-	      GetParams( &dParams );
-	      dParams.rgdispidNamedArgs = &lPropPut;
-	      dParams.cNamedArgs = 1;
-
-	      nOleError = pDisp->lpVtbl->Invoke( pDisp,
-	                                         lDispID,
-	                                         &IID_NULL,
-	                                         LOCALE_USER_DEFAULT,
-	                                         DISPATCH_PROPERTYPUT,
-	                                         &dParams,
-	                                         NULL,    // No return value
-	                                         &excep,
-	                                         &uArgErr );
-
-	      FreeParams( &dParams );
-	      }
-
-	   hb_ret();
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLEGETPROPERTY )  // (hOleObject, cPropName, uParams...)
-	{
-	   IDispatch * pDisp = ( IDispatch * ) hb_parnl( 1 );
-	   LPSTR cMember;
-	   DISPID lDispID;
-	   DISPPARAMS dParams;
-	   UINT uArgErr;
-
-	   VariantInit( &RetVal );
-	   memset( (LPBYTE) &excep, 0, sizeof( excep ) );
-
-	   cMember = AnsiToWide( hb_parc( 2 ) );
-	   nOleError = pDisp->lpVtbl->GetIDsOfNames( pDisp, &IID_NULL, (unsigned short **) &cMember, 1, LOCALE_USER_DEFAULT, &lDispID );
-	   hb_xfree( cMember );
-
-	   if ( nOleError == S_OK )
-	      {
-	      GetParams( &dParams );
-
-	      nOleError = pDisp->lpVtbl->Invoke( pDisp,
-	                                         lDispID,
-	                                         &IID_NULL,
-	                                         LOCALE_USER_DEFAULT,
-	                                         DISPATCH_PROPERTYGET,
-	                                         &dParams,
-	                                         &RetVal,
-	                                         &excep,
-	                                         &uArgErr );
-
-	      FreeParams( &dParams );
-	      }
-
-	   RetValue();
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLEQUERYINTERFACE )  // (hOleObject, cIID ) -> ppvObject
-	{
-	   IUnknown * pUnk = ( IUnknown * ) hb_parnl( 1 );
-	   IUnknown * ppvObject = NULL;
-	   GUID iid;
-	   LPSTR ciid;
-
-	   nOleError = S_OK;
-
-	   if ( hb_parc( 2 )[ 0 ] == '{' )
-	      {
-	      ciid = AnsiToWide( hb_parc( 2 ) );
-	      nOleError = CLSIDFromString( ( LPOLESTR ) ciid, &iid );
-	      hb_xfree( ciid );
-	      }
-	   else
-	      memcpy( ( LPVOID ) &iid, hb_parc( 2 ), sizeof( iid ) );
-
-	   if ( nOleError == S_OK )
-	      nOleError = pUnk -> lpVtbl -> QueryInterface( pUnk, (const struct _GUID *const) &iid, (void **) &ppvObject );
-
-	   hb_retnl( ( LONG ) ppvObject );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLEADDREF )  // ( hOleObject )
-	{
-	   IUnknown * pUnk = ( IUnknown * ) hb_parnl( 1 );
-
-	   hb_retnl( pUnk -> lpVtbl -> AddRef( pUnk ) );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLERELEASE )  // ( hOleObject )
-	{
-	   IUnknown * pUnk = ( IUnknown * ) hb_parnl( 1 );
-
-	   hb_retnl( pUnk -> lpVtbl -> Release( pUnk ) );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( COMFUNCTION )  // ( hOleObject, nFunc, uParams... )
-	{
-	   typedef HRESULT ( STDMETHODCALLTYPE * COMFunc ) ( IUnknown * pUnk );
-
-	   IUnknown * pUnk = ( IUnknown * ) hb_parnl( 1 );
-	   COMFunc pFunc;
-	   COMFunc *vTbl;
-	   int i, iParams = hb_pcount();
-	   double doubles[16];
-	   LPVOID ptros[16];
-
-
-	   vTbl = ( COMFunc * ) &( pUnk -> lpVtbl -> QueryInterface );
-	   vTbl += hb_parni( 2 ) + 2;
-	   pFunc = *vTbl;
-
-	   for ( i = iParams; i > 2; i-- )
-	   {
-              char *sString;
-              int iInt;
-              double dDouble;
-
-	      switch ( ( hb_parinfo( i ) & ~HB_IT_BYREF) )
-	      {
-	         case HB_IT_STRING:
-	         case HB_IT_MEMO:
-                      //_pusstring( hb_parc( i ) );
-		      sString = hb_parc( i );
-		      __asm push sString
-                      break;
-
-	         case HB_IT_LOGICAL:
-	              if ( ISBYREF( i ) )
-	              {
-	                 ptros[ i ] = (LPVOID) hb_parl( i );
-	                 //_pushstring( (char *) &ptros[ i ] );
-			 sString = ( char * ) &ptros[ i ];
-			 __asm push sString
-	              }
-	              else
-                      {
-	                 //_pushint( hb_parl( i ) );
-			 iInt = hb_parl( i );
-			 __asm push iInt
-                      }
-	              break;
-
-	         case HB_IT_INTEGER:
-	         case HB_IT_LONG:
-	              if ( ISBYREF( i ) )
-	              {
-	                 ptros[ i ] = (LPVOID) hb_parnl( i );
-	                 //_pushstring( (char *) &ptros[ i ] );
-			 sString = ( char * ) &ptros[ i ];
-			 __asm push sString
-	              }
-	              else
-                      {
-	                 //_pushint( hb_parnl( i ) );
-			 iInt = hb_parnl( i );
-			 __asm push iInt
-                      }
-	              break;
-
-	         case HB_IT_DOUBLE:
-	              if ( ISBYREF( i ) )
-	              {
-	                 doubles[ i ] = hb_parnd( i );
-	                 //_pushstring( (char *) &doubles[ i ] );
-			 sString = ( char * ) &doubles[ i ];
-			 __asm push sString
-	              }
-	              else
-		      {
-	                 //_pushdouble( hb_parnd( i ) );
-			 dDouble = hb_parl( i );
-			 __asm push dDouble
-		      }
-	              break;
-
-	         case HB_IT_DATE:
-	              if ( ISBYREF( i ) )
-	              {
-	                 doubles[ i ] = DateToDbl( hb_pards( i ) );
-	                 //_pushstring( (char *) &doubles[ i ] );
-			 sString = ( char * ) &doubles[ i ];
-			 __asm push sString
-	              }
-	              else
-                      {
-	                 //_pushdouble( DateToDbl( hb_pards( i ) ) );
-			 dDouble = DateToDbl( hb_pards( i ) );
-			 __asm push dDouble
-                      }
-	              break;
-
-	         default:
-	              //_pushstring( NULL );
-		      sString = ( char * ) NULL;
-		      __asm push sString
-	              break;
-	      }
-	   }
-
-	   nOleError = pFunc( pUnk );
-
-	   for ( i = 3; i <= iParams; i++ )
-	   {
-	      if ( ISBYREF( i ) )
-	      {
-	         switch ( (hb_parinfo( i ) & ~HB_IT_BYREF) )
-	         {
-	            case HB_IT_STRING:
-	            case HB_IT_MEMO:
-	                 hb_storc( (char *) hb_parc( i ), i );
-	                 break;
-
-	            case HB_IT_LOGICAL:
-	                 hb_storl( (long) ptros[ i ], i );
-	                 break;
-
-	            case HB_IT_INTEGER:
-	            case HB_IT_LONG:
-	                 hb_stornl( (long) ptros[ i ], i );
-	                 break;
-
-	            case HB_IT_DOUBLE:
-	                 hb_stornd( doubles[ i ], i );
-	                 break;
-
-	            case HB_IT_DATE:
-	                 hb_stords( DblToDate( doubles[ i ] ), i );
-	                 break;
-	         }
-              }
-           }
-
-	   hb_ret();
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLEERROR )
-	{
-	   hb_retnl( (LONG) nOleError );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLEISOBJECT )
-	{
-	   hb_retl( RetVal.n1.n2.vt == VT_DISPATCH );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLEUNINITIALIZE )
-	{
-	   if ( nInitialized > 0 )
-	      {
-	      nInitialized--;
-	      if ( nInitialized == 0 )
-	         OleUninitialize();
-	      }
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( OLE2TXTERROR )
-	{
-	   switch ( (LONG) nOleError)
-	      {
-	      case S_OK:
-	         hb_retc( "S_OK" );
-	         break;
-
-	      case CO_E_CLASSSTRING:
-	         hb_retc( "CO_E_CLASSSTRING" );
-	         break;
-
-	      case OLE_E_WRONGCOMPOBJ:
-	         hb_retc( "OLE_E_WRONGCOMPOBJ" );
-	         break;
-
-	      case REGDB_E_CLASSNOTREG:
-	         hb_retc( "REGDB_E_CLASSNOTREG" );
-	         break;
-
-	      case REGDB_E_WRITEREGDB:
-	         hb_retc( "REGDB_E_WRITEREGDB" );
-	         break;
-
-	      case E_OUTOFMEMORY:
-	         hb_retc( "E_OUTOFMEMORY" );
-	         break;
-
-	      case E_INVALIDARG:
-	         hb_retc( "E_INVALIDARG" );
-	         break;
-
-	      case E_UNEXPECTED:
-	         hb_retc( "E_UNEXPECTED" );
-	         break;
-
-	      case DISP_E_UNKNOWNNAME:
-	         hb_retc( "DISP_E_UNKNOWNNAME" );
-	         break;
-
-	      case DISP_E_UNKNOWNLCID:
-	         hb_retc( "DISP_E_UNKNOWNLCID" );
-	         break;
-
-	      case DISP_E_BADPARAMCOUNT:
-	         hb_retc( "DISP_E_BADPARAMCOUNT" );
-	         break;
-
-	      case DISP_E_BADVARTYPE:
-	         hb_retc( "DISP_E_BADVARTYPE" );
-	         break;
-
-	      case DISP_E_EXCEPTION:
-	         hb_retc( "DISP_E_EXCEPTION" );
-	         break;
-
-	      case DISP_E_MEMBERNOTFOUND:
-	         hb_retc( "DISP_E_MEMBERNOTFOUND" );
-	         break;
-
-	      case DISP_E_NONAMEDARGS:
-	         hb_retc( "DISP_E_NONAMEDARGS" );
-	         break;
-
-	      case DISP_E_OVERFLOW:
-	         hb_retc( "DISP_E_OVERFLOW" );
-	         break;
-
-	      case DISP_E_PARAMNOTFOUND:
-	         hb_retc( "DISP_E_PARAMNOTFOUND" );
-	         break;
-
-	      case DISP_E_TYPEMISMATCH:
-	         hb_retc( "DISP_E_TYPEMISMATCH" );
-	         break;
-
-	      case DISP_E_UNKNOWNINTERFACE:
-	         hb_retc( "DISP_E_UNKNOWNINTERFACE" );
-	         break;
-
-	      case DISP_E_PARAMNOTOPTIONAL:
-	         hb_retc( "DISP_E_PARAMNOTOPTIONAL" );
-	         break;
-
-	      default:
-	         hb_retc( "Unknown error" );
-	         break;
-	      };
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( ANSITOWIDE )  // ( cAnsiStr ) -> cWideStr
-	{
-	   WORD wLen;
-	   LPSTR cOut;
-
-	   wLen = MultiByteToWideChar( CP_ACP, MB_PRECOMPOSED, hb_parc( 1 ), -1, 0, 0 );
-	   cOut = ( char * ) hb_xgrab( wLen * 2 );
-	   MultiByteToWideChar( CP_ACP, MB_PRECOMPOSED, hb_parc( 1 ), -1,
-	                        ( LPWSTR ) cOut, wLen );
-
-	   hb_retclen( cOut, wLen * 2 - 1 );
-	   hb_xfree( cOut );
-	}
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( WIDETOANSI )  // ( cWideStr, nLen ) -> cAnsiStr
-	{
-	   WORD wLen;
-	   LPWSTR cWideStr;
-	   LPSTR cOut = NULL;
-
-	   cWideStr = ( LPWSTR ) hb_parc( 1 );
-	   wLen = WideCharToMultiByte( CP_ACP, WC_COMPOSITECHECK, cWideStr, -1, cOut, 0, NULL, NULL );
-	   cOut = ( char * ) hb_xgrab( wLen );
-	   WideCharToMultiByte( CP_ACP, WC_COMPOSITECHECK, cWideStr, -1,
-	                        cOut, wLen, NULL, NULL );
-
-	   hb_retc( cOut );
-	   hb_xfree( cOut );
-	}
-
-	/*
-	extern "C"
-        {
-		void pushstring( char * cParam )
-		{
-		}
-
-		void pushint( int lParam )
-		{
-		}
-
-		void pushdouble( double ndParam )
-		{
-		}
-        }
-	*/
-
-	//---------------------------------------------------------------------------//
-
-	HB_FUNC( MESSAGEBOX )
-	{
-	    hb_retni( MessageBox( ( HWND ) hb_parnl( 1 ), hb_parc( 2 ), hb_parc( 3 ), hb_parni( 4 ) ) );
-	}
-
-	//---------------------------------------------------------------------------//
-
-#pragma ENDDUMP
-
-#endif
+ //---------------------------------------------------------------------------//
 
 #endif
 
 //----------------------------------------------------------------------------//
+#ifdef FW
+
 STATIC FUNCTION InitFWRules()
 
    /* Defines */
@@ -2663,4 +1718,527 @@ STATIC FUNCTION InitFWResults()
 
 RETURN .T.
 
+#else
+   STATIC FUNCTION InitFWRules()
+   RETURN .T.
+
+   STATIC FUNCTION InitFWResults()
+   RETURN .T.
+#endif
+
+//--------------------------------------------------------------//
+
+#ifdef MINIGUI
+
+FUNCTION InitMiniGUIRules()
+
+   /* Defines */
+   aAdd( aDefRules, { 'EN_SETFOCUS' ,  , .T. } )
+   aAdd( aDefRules, { 'EN_KILLFOCUS' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_SETFOCUS' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_KILLFOCUS' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_UNDO' ,  , .T. } )
+   aAdd( aDefRules, { 'EM_SETMODIFY' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_PASTE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_CHAR' ,  , .T. } )
+   aAdd( aDefRules, { 'EM_GETLINE' ,  , .T. } )
+   aAdd( aDefRules, { 'EM_SETSEL' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_CLEAR' ,  , .T. } )
+   aAdd( aDefRules, { 'EM_GETSEL' ,  , .T. } )
+   aAdd( aDefRules, { 'EM_UNDO' ,  , .T. } )
+   aAdd( aDefRules, { 'EN_CHANGE' ,  , .T. } )
+   aAdd( aDefRules, { 'EN_UPDATE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_ACTIVATE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_SIZING' ,  , .T. } )
+   aAdd( aDefRules, { 'MK_LBUTTON' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_MOUSEMOVE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_CONTEXTMENU' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_TIMER' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_SIZE' ,  , .T. } )
+   aAdd( aDefRules, { 'TBM_SETPOS' ,  , .T. } )
+   aAdd( aDefRules, { 'TBM_GETPOS' ,  , .T. } )
+   aAdd( aDefRules, { 'PBM_SETPOS' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_SYSCOMMAND' ,  , .T. } )
+   aAdd( aDefRules, { 'SC_CLOSE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_KEYDOWN' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_CLOSE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_COMMAND' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_DESTROY' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_LBUTTONDOWN' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_NOTIFY' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_CREATE' ,  , .T. } )
+   aAdd( aDefRules, { 'WM_QUIT' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_RETURNONLYFSDIRS' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_DONTGOBELOWDOMAIN' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_STATUSTEXT' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_RETURNFSANCESTORS' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_EDITBOX' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_VALIDATE' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_NEWDIALOGSTYLE' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_USENEWUI' , { {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+   aAdd( aDefRules, { 'BIF_BROWSEINCLUDEURLS' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_BROWSEFORCOMPUTER' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_BROWSEFORPRINTER' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_BROWSEINCLUDEFILES' ,  , .T. } )
+   aAdd( aDefRules, { 'BIF_SHAREABLE' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_DESKTOP' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_INTERNET' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PROGRAMS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_CONTROLS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PRINTERS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PERSONAL' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_FAVORITES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_STARTUP' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_RECENT' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_SENDTO' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_BITBUCKET' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_STARTMENU' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_DESKTOPDIRECTORY' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_DRIVES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_NETWORK' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_NETHOOD' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_FONTS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_TEMPLATES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_STARTMENU' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_PROGRAMS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_STARTUP' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_DESKTOPDIRECTORY' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_APPDATA' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PRINTHOOD' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_LOCAL_APPDATA' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_ALTSTARTUP' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_ALTSTARTUP' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_FAVORITES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_INTERNET_CACHE' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COOKIES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_HISTORY' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_APPDATA' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_WINDOWS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_SYSTEM' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PROGRAM_FILES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_MYPICTURES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PROFILE' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_SYSTEMX86' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PROGRAM_FILESX86' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PROGRAM_FILES_COMMON' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_PROGRAM_FILES_COMMONX86' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_TEMPLATES' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_DOCUMENTS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_COMMON_ADMINTOOLS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_ADMINTOOLS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_CONNECTIONS' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_FLAG_CREATE' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_FLAG_DONT_VERIFY' ,  , .T. } )
+   aAdd( aDefRules, { 'CSIDL_FLAG_MASK' ,  , .T. } )
+
+   /* Translates */
+
+   /* Commands */
+   aAdd( aCommRules, { 'ENABLE' , { {    1,   0, 'MENUITEM', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DISABLE' , { {    1,   0, 'MENUITEM', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'CHECK' , { {    1,   0, 'MENUITEM', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'UNCHECK' , { {    1,   0, 'MENUITEM', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    0,   0, 'MAIN', NIL, NIL }, {    0,   0, 'MENU', NIL, NIL }, {    1,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    0,   0, 'MAINMENU', NIL, NIL }, {    1,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    0,   0, 'CONTEXT', NIL, NIL }, {    0,   0, 'MENU', NIL, NIL }, {    1,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    0,   0, 'CONTEXTMENU', NIL, NIL }, {    1,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'END' , { {    0,   0, 'DEFINE', NIL, NIL } } , .F. } )
+   aAdd( aCommRules, { 'POPUP' , { {    1,   0, NIL, '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'END' , { {    0,   0, 'POPUP', NIL, NIL } } , .F. } )
+   aAdd( aCommRules, { 'ITEM' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'ACTION', '<', NIL }, {    3,   1, 'NAME', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'SEPARATOR' ,  , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    1,   0, 'TIMER', '<', NIL }, {    2,   0, 'OF', '<', NIL }, {    3,   0, 'INTERVAL', '<', NIL }, {    4,   0, 'ACTION', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'PANEL', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SLIDER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SLIDER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SLIDER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SLIDER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   0, 'WIDTH', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SLIDER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'HEIGHT', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SLIDER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   0, 'WIDTH', '<', NIL }, {    9,   0, 'HEIGHT', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'PROGRESSBAR', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'PROGRESSBAR', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'PROGRESSBAR', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'HEIGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    1,   0, 'WINDOW', '<', NIL }, {    2,   0, 'AT', '<', NIL }, {    3,   0, ',', '<', NIL }, {    4,   0, 'WIDTH', '<', NIL }, {    5,   0, 'HEIGHT', '<', NIL }, {    6,   1, 'TITLE', '<', NIL }, {    7,   1, NIL, ':', { 'NOMINIMIZE' } }, {    8,   1, NIL, ':', { 'NOMAXIMIZE' } }, {    9,   1, NIL, ':', { 'NOSIZE' } }, {   10,   1, NIL, ':', { 'NOSYSMENU' } }, {   11,   1, NIL, ':', { 'NOCAPTION' } }, {   12,   1, NIL, ':', { 'STATUSBAR' } }, {   13,   1, NIL, '<', { 'ON', 'ON', 'ON', 'ON', 'ON', 'ON' } }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'INIT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   15,  -1, 'RELEASE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   16,  -1, 'MOUSECLICK', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   17,  -1, 'MOUSEDRAG', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   18,  -1, 'MOUSEMOVE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   19,  -1, 'SIZE', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    1,   0, 'WINDOW', '<', NIL }, {    2,   0, 'AT', '<', NIL }, {    3,   0, ',', '<', NIL }, {    4,   0, 'WIDTH', '<', NIL }, {    5,   0, 'HEIGHT', '<', NIL }, {    6,   1, 'TITLE', '<', NIL }, {    0,   0, 'TOPMOST', NIL, NIL }, {    7,   1, NIL, ':', { 'NOMINIMIZE' } }, {    8,   1, NIL, ':', { 'NOMAXIMIZE' } }, {    9,   1, NIL, ':', { 'NOSIZE' } }, {   10,   1, NIL, ':', { 'NOSYSMENU' } }, {   11,   1, NIL, ':', { 'NOCAPTION' } }, {   12,   1, NIL, ':', { 'STATUSBAR' } }, {   13,   1, NIL, '<', { 'ON', 'ON', 'ON', 'ON', 'ON', 'ON' } }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'INIT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   15,  -1, 'RELEASE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   16,  -1, 'MOUSECLICK', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   17,  -1, 'MOUSEDRAG', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   18,  -1, 'MOUSEMOVE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   19,  -1, 'SIZE', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DEFINE' , { {    1,   0, 'WINDOW', '<', NIL }, {    2,   0, 'OF', '<', NIL }, {    3,   0, 'AT', '<', NIL }, {    4,   0, ',', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   1, 'TITLE', '<', NIL }, {    0,   0, 'MODAL', NIL, NIL }, {    8,   1, NIL, ':', { 'NOSIZE' } }, {    9,   1, NIL, ':', { 'NOSYSMENU' } }, {   10,   1, NIL, ':', { 'NOCAPTION' } }, {   11,   1, NIL, ':', { 'STATUSBAR' } }, {   12,   1, NIL, '<', { 'ON', 'ON', 'ON', 'ON', 'ON', 'ON' } }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'INIT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'RELEASE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   15,  -1, 'MOUSECLICK', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   16,  -1, 'MOUSEDRAG', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   17,  -1, 'MOUSEMOVE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   18,  -1, 'SIZE', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'BUTTON', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'ACTION', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'BUTTON', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'ACTION', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'HEIGHT', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'BUTTON', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'ACTION', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'BUTTON', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'ACTION', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'HEIGHT', '<', NIL }, {    9,   0, 'FONT', '<', NIL }, {   10,   0, 'SIZE', '<', NIL }, {   11,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'BUTTON', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'BITMAP', '<', NIL }, {    6,   0, 'ACTION', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'HEIGHT', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'IMAGE', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'FILENAME', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'IMAGE', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'FILENAME', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'HEIGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'CHECKBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'CHECKBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'CHECKBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'CHECKBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'RADIOGROUP', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'OPTIONS', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'RADIOGROUP', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'OPTIONS', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'RADIOGROUP', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'OPTIONS', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'RADIOGROUP', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'OPTIONS', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LABEL', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LABEL', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LABEL', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'HEIGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LABEL', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'HEIGHT', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'FONT', '<', NIL }, {    6,   0, 'SIZE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'VALUE', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'ROWS', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'COMBOBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'FONT', '<', NIL }, {    6,   0, 'SIZE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'DATEPICKER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LISTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'ROWS', '<', NIL }, {    8,   0, 'VALUE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LISTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'ROWS', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LISTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LISTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'ROWS', '<', NIL }, {    8,   0, 'VALUE', '<', NIL }, {    9,   0, 'FONT', '<', NIL }, {   10,   0, 'SIZE', '<', NIL }, {   11,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LISTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'ROWS', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'LISTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   0, 'WIDTH', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'WIDTH', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'SPINNER', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'RANGE', '<', NIL }, {    6,   0, ',', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   0, 'WIDTH', '<', NIL }, {    9,   0, 'FONT', '<', NIL }, {   10,   0, 'SIZE', '<', NIL }, {   11,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   1, 'TOOLTIP', '<', NIL }, {    6,   1, 'MAXLENGHT', '<', NIL }, {    7,   1, NIL, ':', { 'UPPERCASE' } }, {    8,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL }, {    7,   1, 'MAXLENGHT', '<', NIL }, {    8,   1, NIL, ':', { 'UPPERCASE' } }, {    9,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   1, 'TOOLTIP', '<', NIL }, {    7,   1, 'MAXLENGHT', '<', NIL }, {    8,   1, NIL, ':', { 'UPPERCASE' } }, {    9,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL }, {    9,   1, NIL, ':', { 'UPPERCASE' } }, {   10,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'FONT', '<', NIL }, {    6,   0, 'SIZE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL }, {    9,   1, NIL, ':', { 'UPPERCASE' } }, {   10,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL }, {   10,   1, NIL, ':', { 'UPPERCASE' } }, {   11,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL }, {   10,   1, NIL, ':', { 'UPPERCASE' } }, {   11,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL }, {   10,   1, 'MAXLENGHT', '<', NIL }, {   11,   1, NIL, ':', { 'UPPERCASE' } }, {   12,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   15,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   1, 'WIDTH', '<', NIL }, {    6,   1, 'VALUE', '<', NIL }, {    7,   1, 'FONT', '<', NIL }, {    8,   1, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {   10,   0, 'INPUTMASK', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    5,   1, 'TOOLTIP', '<', NIL }, {    6,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    7,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    8,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    6,   1, 'TOOLTIP', '<', NIL }, {    7,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    8,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    6,   1, 'TOOLTIP', '<', NIL }, {    7,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    8,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    5,   0, 'FONT', '<', NIL }, {    6,   0, 'SIZE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    0,   0, 'NUMERIC', NIL, NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL }, {   10,   1, 'MAXLENGHT', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    5,   1, 'TOOLTIP', '<', NIL }, {    6,   1, 'MAXLENGHT', '<', NIL }, {    7,   1, NIL, ':', { 'UPPERCASE' } }, {    8,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {    9,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    6,   1, 'TOOLTIP', '<', NIL }, {    7,   1, 'MAXLENGHT', '<', NIL }, {    8,   1, NIL, ':', { 'UPPERCASE' } }, {    9,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    6,   1, 'TOOLTIP', '<', NIL }, {    7,   1, 'MAXLENGHT', '<', NIL }, {    8,   1, NIL, ':', { 'UPPERCASE' } }, {    9,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   10,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL }, {    9,   1, NIL, ':', { 'UPPERCASE' } }, {   10,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    5,   0, 'FONT', '<', NIL }, {    6,   0, 'SIZE', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL }, {    9,   1, NIL, ':', { 'UPPERCASE' } }, {   10,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   11,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL }, {   10,   1, NIL, ':', { 'UPPERCASE' } }, {   11,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    6,   0, 'FONT', '<', NIL }, {    7,   0, 'SIZE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL }, {   10,   1, NIL, ':', { 'UPPERCASE' } }, {   11,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   12,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TEXTBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'VALUE', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    0,   0, 'PASSWORD', NIL, NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL }, {   10,   1, 'MAXLENGHT', '<', NIL }, {   11,   1, NIL, ':', { 'UPPERCASE' } }, {   12,   1, NIL, ':', { 'LOWERCASE' } }, {    0,   1, 'ON', NIL, NIL }, {   13,  -1, 'GOTFOCUS', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   14,  -1, 'CHANGE', '<', NIL }, {    0,   1, 'ON', NIL, NIL }, {   15,  -1, 'LOSTFOCUS', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL }, {   10,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL }, {   11,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    0,   0, 'READONLY', NIL, NIL }, {    7,   1, 'TOOLTIP', '<', NIL }, {    8,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    0,   0, 'READONLY', NIL, NIL }, {    8,   1, 'TOOLTIP', '<', NIL }, {    9,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    0,   0, 'READONLY', NIL, NIL }, {    7,   0, 'FONT', '<', NIL }, {    8,   0, 'SIZE', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL }, {   10,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'EDITBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'VALUE', '<', NIL }, {    0,   0, 'READONLY', NIL, NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL }, {   11,   1, 'MAXLENGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GROUPBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'HEIGHT', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GROUPBOX', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'CAPTION', '<', NIL }, {    6,   0, 'WIDTH', '<', NIL }, {    7,   0, 'HEIGHT', '<', NIL }, {    8,   0, 'FONT', '<', NIL }, {    9,   0, 'SIZE', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GRID', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'HEADERS', '<', NIL }, {    8,   0, 'WIDTHS', '<', NIL }, {    9,   0, 'ROWS', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GRID', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'HEADERS', '<', NIL }, {    8,   0, 'WIDTHS', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GRID', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'HEADERS', '<', NIL }, {    8,   0, 'WIDTHS', '<', NIL }, {    9,   0, 'ROWS', '<', NIL }, {   10,   0, 'VALUE', '<', NIL }, {   11,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GRID', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'HEADERS', '<', NIL }, {    8,   0, 'WIDTHS', '<', NIL }, {    9,   0, 'ROWS', '<', NIL }, {   10,   0, 'FONT', '<', NIL }, {   11,   0, 'SIZE', '<', NIL }, {   12,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GRID', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'HEADERS', '<', NIL }, {    8,   0, 'WIDTHS', '<', NIL }, {    9,   0, 'FONT', '<', NIL }, {   10,   0, 'SIZE', '<', NIL }, {   11,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'GRID', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'HEADERS', '<', NIL }, {    8,   0, 'WIDTHS', '<', NIL }, {    9,   0, 'ROWS', '<', NIL }, {   10,   0, 'VALUE', '<', NIL }, {   11,   0, 'FONT', '<', NIL }, {   12,   0, 'SIZE', '<', NIL }, {   13,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TAB', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'CAPTIONS', '<', NIL }, {    8,   0, 'MAP', '<', NIL }, {    9,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TAB', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'CAPTIONS', '<', NIL }, {    8,   0, 'MAP', '<', NIL }, {    9,   0, 'VALUE', '<', NIL }, {   10,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TAB', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'CAPTIONS', '<', NIL }, {    8,   0, 'MAP', '<', NIL }, {    9,   0, 'FONT', '<', NIL }, {   10,   0, 'SIZE', '<', NIL }, {   11,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '@' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, 'TAB', '<', NIL }, {    4,   0, 'OF', '<', NIL }, {    5,   0, 'WIDTH', '<', NIL }, {    6,   0, 'HEIGHT', '<', NIL }, {    7,   0, 'CAPTIONS', '<', NIL }, {    8,   0, 'MAP', '<', NIL }, {    9,   0, 'VALUE', '<', NIL }, {   10,   0, 'FONT', '<', NIL }, {   11,   0, 'SIZE', '<', NIL }, {   12,   1, 'TOOLTIP', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'SETFOCUS' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ADD' , { {    1,   0, 'ITEM', '<', NIL }, {    2,   0, 'TO', '<', NIL }, {    3,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DELETE' , { {    1,   0, 'ITEM', '<', NIL }, {    2,   0, 'FROM', '<', NIL }, {    3,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DELETE' , { {    0,   0, 'ITEM', NIL, NIL }, {    0,   0, 'ALL', NIL, NIL }, {    1,   0, 'FROM', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'PREVIEW' , { {    1,   0, 'REPORT', '<', NIL }, {    2,   1, 'FOR', '<', NIL }, {    3,   1, NIL, ':', { 'PLAIN' } }, {    4,   1, 'HEADING', '<', NIL }, {    5,   1, NIL, ':', { 'SUMMARY' } } } , .F. } )
+   aAdd( aCommRules, { 'RELEASE' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'RELEASE' , { {    0,   0, 'WINDOW', NIL, NIL }, {    0,   0, 'ALL', NIL, NIL } } , .F. } )
+   aAdd( aCommRules, { 'ENABLE' , { {    1,   0, 'CONTROL', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'SHOW' , { {    1,   0, 'CONTROL', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'HIDE' , { {    1,   0, 'CONTROL', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DISABLE' , { {    1,   0, 'CONTROL', '<', NIL }, {    2,   0, 'OF', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ACTIVATE' , { {    1,   0, 'WINDOW', 'A', NIL } } , .F. } )
+   aAdd( aCommRules, { 'CENTER' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'MAXIMIZE' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'MINIMIZE' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'RESTORE' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'SHOW' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'HIDE' , { {    1,   0, 'WINDOW', '<', NIL } } , .F. } )
+
+RETURN .T.
+
+//--------------------------------------------------------------//
+
+FUNCTION InitMiniGUIResults()
+
+   /* Defines Results*/
+   aAdd( aDefResults, { { {   0, '256' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '512' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '7' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '8' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '772' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '185' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '770' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '258' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '196' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '177' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '771' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '176' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '199' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '768' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '1024' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '6' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '532' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '512' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '123' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '275' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '5' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '1029' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '1024' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '1026' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '274' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '61536' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '256' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0010' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0111' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0002' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0201' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '78' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '18' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0001' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0002' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0004' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0008' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0010' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0020' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0040' } }, { -1} ,  } )
+   aAdd( aDefResults, { , ,  } )
+   aAdd( aDefResults, { { {   0, '0x0080' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x1000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x2000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x4000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x8000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0001' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0002' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0003' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0004' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0005' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0006' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0007' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0008' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0009' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x000a' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x000b' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0010' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0011' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0012' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0013' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0014' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0015' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0016' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0X0017' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0018' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0019' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x001a' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x001b' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x001c' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x001d' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x001e' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x001f' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0020' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0021' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0022' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0023' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0024' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0025' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0026' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0027' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0028' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0029' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x002a' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x002b' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x002c' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x002d' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x002e' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x002f' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0030' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x0031' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x8000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0x4000' } }, { -1} ,  } )
+   aAdd( aDefResults, { { {   0, '0xFF00' } }, { -1} ,  } )
+
+   /* Translates Results*/
+
+   /* Commands Results*/
+   aAdd( aCommResults, { { {   0, 'EnableMenuItem ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DisableMenuItem ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'CheckMenuItem ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'UnCheckMenuItem ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineMainMenu ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineMainMenu ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineContextMenu ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineContextMenu ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'EndMenu ()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, 'DefinePopup ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'EndPopup ()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, 'DefineItem ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' , ' }, {   0,   3 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSeparator ()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, 'DefineTimer ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' , ' }, {   0,   3 }, {   0, ' , ' }, {   0,   4 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePanel ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSlider ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 35 , ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSlider ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 35 , ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSlider ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', 35 , ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   8 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSlider ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   8 }, {   0, ', 35 , ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' , ' }, {   0,   5 }, {   0, ' ,' }, {   0,   7 }, {   0, ' , ' }, {   0,   9 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSlider ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   6 }, {   0, ' , ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   9 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSlider ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   6 }, {   0, ' , ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,  10 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineProgressBar ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 25, ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineProgressBar ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', 25, ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineProgressBar ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, ',' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineWindow ( ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   3 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ', ' }, {   0,  10 }, {   0, ', ' }, {   0,  11 }, {   0, ',' }, {   0,  12 }, {   0, ', ' }, {   0,  13 }, {   0, ',' }, {   0,  14 }, {   0, ', ' }, {   0,  15 }, {   0, ' , ' }, {   0,  17 }, {   0, ', ' }, {   0,  19 }, {   0, ' , ' }, {   0,  16 }, {   0, ' , ' }, {   0,  18 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTopmostWindow ( ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   3 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ', ' }, {   0,  10 }, {   0, ', ' }, {   0,  11 }, {   0, ' ,' }, {   0,  12 }, {   0, ', ' }, {   0,  13 }, {   0, ' ,' }, {   0,  14 }, {   0, ', ' }, {   0,  15 }, {   0, ' , ' }, {   0,  17 }, {   0, ' , ' }, {   0,  19 }, {   0, ' , ' }, {   0,  16 }, {   0, ' , ' }, {   0,  18 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineModalWindow ( ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   3 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   2 }, {   0, ' , ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ', ' }, {   0,  10 }, {   0, ' ,' }, {   0,  11 }, {   0, ', ' }, {   0,  12 }, {   0, ',' }, {   0,  13 }, {   0, ', ' }, {   0,  14 }, {   0, ' , ' }, {   0,  16 }, {   0, ' , ' }, {   0,  18 }, {   0, ' , ' }, {   0,  15 }, {   0, ' , ' }, {   0,  17 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineButton ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ,100,28,"",0 ,' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineButton ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ,' }, {   0,   7 }, {   0, ',' }, {   0,   8 }, {   0, ',"",0 ,' }, {   0,   9 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineButton ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ,100,28,' }, {   0,   7 }, {   0, ',' }, {   0,   8 }, {   0, ' ,' }, {   0,   9 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineButton ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ,' }, {   0,   7 }, {   0, ',' }, {   0,   8 }, {   0, ',' }, {   0,   9 }, {   0, ',' }, {   0,  10 }, {   0, ' ,' }, {   0,  11 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineImageButton ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', "", ' }, {   0,   6 }, {   0, ' ,' }, {   0,   7 }, {   0, ',' }, {   0,   8 }, {   0, ',' }, {   0,   5 }, {   0, ' ,' }, {   0,   9 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineImage ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ' ,0 ,0 )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineImage ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCheckBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ',"", 0 , ' }, {   0,   7 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCheckBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', .f., "", 0 , ' }, {   0,   6 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCheckBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   3 }, {   0, ' , ' }, {   0,   9 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCheckBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', .f. ,' }, {   0,   6 }, {   0, ' ,' }, {   0,   3 }, {   0, ' , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineradioGroup ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineradioGroup ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', 0  , ' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineradioGroup ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineradioGroup ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', 0 , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineLabel ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', 0, 28, "", 0   )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineLabel ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', 28, "", 0  )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineLabel ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', "", 0   )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineLabel ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, '  )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ,"",0  , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ', 0  ,"",0  , ' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, {} , 0  ,"",0  , ' }, {   0,   5 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, '  ,"",0  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, ', 0  ,"",0  , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', {} , 0  ,"",0  , ' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ', 0 , ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, {} , 0 , ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' , ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, ', 0 , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineCombo ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', {} , 0 , ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 25 , Date() , "", 0, ' }, {   0,   5 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', 25 ,Date() ,"",0 , ' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 25 ,' }, {   0,   5 }, {   0, ' ,"",0 , ' }, {   0,   6 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', 25 ,' }, {   0,   5 }, {   0, ' ,"",0 , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 25 ,Date() ,' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', 25 ,Date() ,' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, 25 ,' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineDatePick ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', 25 ,' }, {   0,   5 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineListBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ,"",0 , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineListBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', 0 ,"",0 , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineListBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', {}, 0 ,"",0 , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineListBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, ', ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineListBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', 0 , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, ', ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineListBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', {}, 0 , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, '  ,"",0 ,' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   7 }, {   0, '  ,"",0 ,' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ', ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   5 }, {   0, '  ,"",0 ,' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ', ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   7 }, {   0, '  ,"",0 ,' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ' , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ' ,' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ' , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, ' ,' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ', ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   5 }, {   0, ' , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, ',' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ', ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineSpinner ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   7 }, {   0, ' , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, ',' }, {   0,   5 }, {   0, ' ,' }, {   0,   6 }, {   0, ', ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ""  ,"",0 , ' }, {   0,   5 }, {   0, '  , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ' , ' }, {   0,  11 }, {   0, ' , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, '  ,"",0 , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ""  ,"",0 , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, '  ,"",0 , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, "" , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  14 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  13 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', "" , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  14 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  13 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  15 }, {   0, '  , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  14 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineMaskedTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,  10 }, {   0, ' , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '   , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, "" ,"",0 , ' }, {   0,   5 }, {   0, '  , ' }, {   0,   6 }, {   0, '   , ' }, {   0,   9 }, {   0, '  , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ' ,"",0 , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, '    , ' }, {   0,  10 }, {   0, '  , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', "" ,"",0 , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, '    , ' }, {   0,  10 }, {   0, '  , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, ' ,"",0 , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, '    , ' }, {   0,  11 }, {   0, '  , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, "" , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, '   , ' }, {   0,  11 }, {   0, '  , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', "" , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, '    , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineNumericTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, ' , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, '    , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ""  ,"",0 , ' }, {   0,   5 }, {   0, '  , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, '    , ' }, {   0,  11 }, {   0, '  , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, '  ,"",0 , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, '   , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ""  ,"",0 , ' }, {   0,   6 }, {   0, '  , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, '   , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, '  ,"",0 , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, '    , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ""  , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, '   , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', 120, ' }, {   0,   5 }, {   0, '  , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, '    , ' }, {   0,  14 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  13 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ""  , ' }, {   0,   6 }, {   0, ' , ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, '   , ' }, {   0,  14 }, {   0, '  , ' }, {   0,  12 }, {   0, '  , ' }, {   0,  13 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefinePasswordTextBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   5 }, {   0, '  , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' , ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, '   , ' }, {   0,  15 }, {   0, '   , ' }, {   0,  13 }, {   0, '  , ' }, {   0,  14 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ',"", "", 0 , ' }, {   0,   7 }, {   0, ' , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', "", 0 , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', "" ,' }, {   0,   7 }, {   0, ',' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ,' }, {   0,   8 }, {   0, ',' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineReadOnlyEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', "","",0 , ' }, {   0,   7 }, {   0, '  , ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineReadOnlyEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ',"",0 , ' }, {   0,   8 }, {   0, '  , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineReadOnlyEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', "" ,' }, {   0,   7 }, {   0, ' ,' }, {   0,   8 }, {   0, ' , ' }, {   0,   9 }, {   0, '  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineReadOnlyEditBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ,' }, {   0,   8 }, {   0, ' ,' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGroupBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ',"",0 )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGroupBox ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGrid ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' , 0 ,"",0, ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGrid ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', {} , 0 ,"",0, ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGrid ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, ',"",0 , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGrid ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' , 0 ,' }, {   0,  10 }, {   0, ',' }, {   0,  11 }, {   0, ' , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGrid ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', {} , 0 ,' }, {   0,   9 }, {   0, ', ' }, {   0,  10 }, {   0, ' , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineGrid ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, ',' }, {   0,  11 }, {   0, ', ' }, {   0,  12 }, {   0, ' , ' }, {   0,  13 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTab ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', 1 ,"",0 , ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTab ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' ,"",0  , ' }, {   0,  10 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTab ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', 1 , ' }, {   0,   9 }, {   0, ', ' }, {   0,  10 }, {   0, '  , ' }, {   0,  11 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DefineTab ( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   2 }, {   0, ', ' }, {   0,   1 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' , ' }, {   0,  10 }, {   0, ', ' }, {   0,  11 }, {   0, '  , ' }, {   0,  12 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'SetFocus(' }, {   0,   1 }, {   0, ',' }, {   0,   2 }, {   0, ')' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'AddItem(' }, {   0,   2 }, {   0, ',' }, {   0,   3 }, {   0, ',' }, {   0,   1 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DeleteItem(' }, {   0,   2 }, {   0, ',' }, {   0,   3 }, {   0, ',' }, {   0,   1 }, {   0, ')' } }, { -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DeleteAllItems(' }, {   0,   1 }, {   0, ',' }, {   0,   2 }, {   0, ')' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PreviewReport ( ' }, {   0,   1 }, {   0, ', ' }, {   0,   3 }, {   0, ' , ' }, {   0,   5 }, {   0, ' , ' }, {   0,   2 }, {   0, ', ' }, {   0,   4 }, {   0, ' )' } }, { -1,  1, -1,  6, -1,  6, -1,  3, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'ReleaseWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'ReleaseAllWindows()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, 'EnableControl ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'ShowControl ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'HideControl ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DisableControl ( ' }, {   0,   1 }, {   0, ' , ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+   aAdd( aCommResults, { { {   0, 'ActivateWindowx ( {' }, {   0,   1 }, {   0, '} )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'CenterWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'MaximizeWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'MinimizeWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'RestoreWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'ShowWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'HideWindow ( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+
+RETURN .T.
+
+#include "MiniGui.prg"
+
+#else
+   STATIC FUNCTION InitMiniGUIRules()
+   RETURN .T.
+
+   STATIC FUNCTION InitMiniGUIResults()
+   RETURN .T.
+#endif
 //--------------------------------------------------------------//
