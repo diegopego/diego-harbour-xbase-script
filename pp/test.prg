@@ -40,7 +40,10 @@ PROCEDURE Main
    ? FIELD->First
 
    cLocal := "in main"
-   ? Test()
+   
+   //? Test()
+   DO test with cLocal
+
    ? cLocal
    ? cName
 

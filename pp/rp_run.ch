@@ -76,6 +76,9 @@
 
 #COMMAND DO <(file)>.prg => PP_Run( #<file> + ".prg" )
 
+#COMMAND DO <!proc!> => <proc>()
+#COMMAND DO <!proc!> WITH <arg1> [, <argN>] => <proc>( <arg1>[, <argN>] )
+ 
 #COMMAND INIT PROCEDURE <!name!>[()]            => PP_PROC_INIT <name>
 #COMMAND EXIT PROCEDURE <!name!>[()]            => PP_PROC_EXIT <name>
 
