@@ -198,11 +198,15 @@ STATIC s_acFlowType := {},  s_nFlowId := 0
 static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F.
 
 //--------------------------------------------------------------//
-
-STATIC PROCEDURE Main( sSource, p1, p2, p3, p4, p5, p6, p7, p8, p9 )
+#ifdef __HARBOUR__
+  STATIC PROCEDURE Main( sSource, p1, p2, p3, p4, p5, p6, p7, p8, p9 )
+#else
+  PROCEDURE Main( sSource, p1, p2, p3, p4, p5, p6, p7, p8, p9 )
+#endif
 
    LOCAL sIncludePath, nNext, sPath, sSwitch := ""
    LOCAL nAt, sParams, sPPOExt, aParams
+   LOCAL sDefine
 
    IF p1 != NIL
       sSwitch += p1
@@ -1862,7 +1866,7 @@ FUNCTION RP_Run_Err( oErr, aProcedures )
       ENDIF
    ENDIF
 
-   TraceLog( sModule, "Sorry, R/T Error: [" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) +  "] '" + oErr:Operation + "' " + oErr:Description + sArgs + " " + PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
+   TraceLog( s_sModule, "Sorry, R/T Error: [" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) +  "] '" + oErr:Operation + "' " + oErr:Description + sArgs + " " + PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
    Alert( "Sorry, R/T Error: [" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) + "] '" + oErr:Operation + "' " + oErr:Description + sArgs + " " + PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
 
    BREAK oErr
