@@ -1,9 +1,9 @@
 /*
- * Harbour Project source code:
- * Pre-Processor/Dot prompt environment
+ * xBaseScript Project source code:
+ * Pre-Processor / Dot prompt environment / Script Interpreter
  *
- * Copyright 2000 Ron Pinkas <ronpinkas@profit-master.com>
- * www - http://www.harbour-project.org
+ * Copyright 2000-2001 Ron Pinkas <ronpinkas@profit-master.com>
+ * www - http://www.xBaseScript.com
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
