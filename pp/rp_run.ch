@@ -52,6 +52,10 @@
 
 #COMMAND DECLARE <!class!> <declaraion> <*x*> =>
 
+// Must precede rule for DO CASE.
+#COMMAND DO <!proc!> => <proc>()
+#COMMAND DO <!proc!> WITH <arg1> [, <argN>] => <proc>( <arg1>[, <argN>] )
+
 #COMMAND IF <ifExp>         => PP__IF <ifExp>
 #COMMAND ELSEIF <elseifExp> => PP__ELSEIF <elseifExp>
 #COMMAND ELSE               => PP__ELSE
@@ -73,12 +77,8 @@
 #COMMAND WHILE <cond>                                    => PP__WHILE <cond>
 #COMMAND ENDDO [<*x*>]                                   => PP__ENDDO
 
-
 #COMMAND DO <(file)>.prg => PP_Run( #<file> + ".prg" )
 
-#COMMAND DO <!proc!> => <proc>()
-#COMMAND DO <!proc!> WITH <arg1> [, <argN>] => <proc>( <arg1>[, <argN>] )
- 
 #COMMAND INIT PROCEDURE <!name!>[()]            => PP_PROC_INIT <name>
 #COMMAND EXIT PROCEDURE <!name!>[()]            => PP_PROC_EXIT <name>
 

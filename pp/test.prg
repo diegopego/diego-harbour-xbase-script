@@ -1,11 +1,13 @@
 PROCEDURE Main
 
    LOCAL   cLocal
-   PRIVATE cName
+   PRIVATE cName := "Private"
 
    CLEAR SCREEN
 
-   Alert( "Testinf PP as Interpreter... " )
+   Alert( "Testing PP as Interpreter... " )
+
+   ? cName
 
    USE test
    IF ! File( "test" + IndexExt() )
@@ -40,25 +42,24 @@ PROCEDURE Main
    ? FIELD->First
 
    cLocal := "in main"
-   
-   //? Test()
-   DO test with cLocal
-
+   ? Test( cName, 1, .T. )
    ? cLocal
    ? cName
 
    ? cFromTest
-   ? TestPrv
+   ? Type( "TestPrv" )
 
 RETURN
 
-FUNCTION Test
+static FUNCTION Test( P1, P2 )
 
     PRIVATE TestPrv
     PUBLIC cFromTest
 
+    ? P1, P2
+
     ? cName
-    ? cLocal
+    ? Type( "cLocal" ) // U
 
     M->TestPrv := "Private of Test"
     Test2()
@@ -68,5 +69,17 @@ RETURN ProcName()
 PROCEDURE Test2
 
    ? ProcName(), ProcLine(), M->testPrv
+
+RETURN
+
+INIT Procedure TestInit
+
+   Alert( "In TestInit()" )
+
+RETURN
+
+EXIT Procedure TestExit
+
+   Alert( "In TestExit()" )
 
 RETURN

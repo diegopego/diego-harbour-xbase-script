@@ -1,8 +1,19 @@
+2002-08-23 18:46 UTC-0800 Ron Pinkas <ron@ronpinkas.com>
+  * pp.prg
+    * Moved new DO <proc> [WITH...] rules above DO CASE rule.
+    ! Fixed reporting of line no of a script R/T error.
+
+  * test.prg
+    * Commented out lines intended to generate R/T error, and replaced with display of Out-ofScope Var type.
+
+  * rp_run.ch
+    * Moved new DO <proc> [WITH...] rules above DO CASE rule.
+
 2002-08-23 16:24 UTC-0800 Ron Pinkas <ron@ronpinkas.com>
-  * tests/rp_run.ch
+  * rp_run.ch
     + Added 2 rules to support DO <proc> [WITH ...]
 
-  * tests/pp.prg
+  * pp.prg
     ! Few minor fixes in MatchRule() to correct few reported bugs with:
       @ <r>, <c> ...
       COPY ... TO ...
