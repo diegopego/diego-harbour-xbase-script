@@ -1,9 +1,17 @@
 PROCEDURE Main
 
+   MEMVAR cName
+
+   FIELD first
+
    LOCAL   cLocal
    PRIVATE cName := "Private"
 
    CLEAR SCREEN
+
+   #ifdef HELLO
+     Alert( "Defined" )
+   #endif
 
    Alert( "Testing PP as Interpreter... " )
 
@@ -52,6 +60,8 @@ PROCEDURE Main
 RETURN
 
 static FUNCTION Test( P1, P2 )
+
+    MEMVAR cName
 
     PRIVATE TestPrv
     PUBLIC cFromTest

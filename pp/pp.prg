@@ -2,7 +2,7 @@
  * xBaseScript Project source code:
  * Pre-Processor / Dot prompt environment / Script Interpreter
  *
- * Copyright 2000-2001 Ron Pinkas <ronpinkas@profit-master.com>
+ * Copyright 2000-2001 Ron Pinkas <ronpinkas@ronpinkas.com>
  * www - http://www.xBaseScript.com
  *
  * This program is free software; you can redistribute it and/or modify
@@ -25,8 +25,36 @@
    #COMMAND @ Row(), 0 SAY <nLine> =>
 #endif
 
-#DEFINE MAX_CICLES 64
+#DEFINE MAX_CICLES 256
 #DEFINE PP_BUFFER_SIZE 8192 //16384
+
+#ifdef __CLIP__
+   #ifdef __LINUX__
+      #define __PLATFORM__Linux
+   #endif
+#endif
+
+#ifdef __PLATFORM__Linux
+   #ifndef OS_PATH_DELIMITER
+      #define OS_PATH_DELIMITER '/'
+   #endif
+   #ifndef OS_PATH_LIST_SEPARATOR
+      #define OS_PATH_LIST_SEPARATOR ':'
+   #endif
+   #ifndef OS_PATH_DELIMITER_LIST
+      #define OS_PATH_DELIMITER_LIST "/"
+   #endif
+#else
+   #ifndef OS_PATH_DELIMITER
+      #define OS_PATH_DELIMITER '\'
+   #endif
+   #ifndef OS_PATH_LIST_SEPARATOR
+      #define OS_PATH_LIST_SEPARATOR ';'
+   #endif
+   #ifndef OS_PATH_DELIMITER_LIST
+      #define OS_PATH_DELIMITER_LIST "\/:"
+   #endif
+#endif
 
 #ifdef __HARBOUR__
 
@@ -35,6 +63,11 @@
       #define __FOR_EACH__
       #define __WITH_
       #define __STRING_INDEX__
+
+      REQUEST ErrorSys
+
+      EXTERN CreateObject
+      EXTERN GetActiveObject
    #endif
 
    #ifndef NO_BOOST
@@ -171,9 +204,7 @@
       #ifdef WIN
          #COMMAND Alert( <x> ) => MessageBox( 0, CStr( <x> ), "PP for Windows", 0 )
          EXTERN MessageBox
-         EXTERN CreateObject
       #endif
-
 
    #endif
 
@@ -181,7 +212,7 @@
 
    #DEFINE __CLIPPER__
 
-   #translate At( <find>, <where>, <from> ) => IIF( ( M->__AT__  := At( <find>, SubStr( <where>, <from> ) ) ) == 0, 0, M->__AT__ )
+   #translate At( <find>, <where>, <from> ) => IIF( ( M->__AT__  := At( <find>, SubStr( <where>, <from> ) ) ) == 0, 0, <from> + M->__AT__ - 1 )
 
    #ifndef CRLF
       #DEFINE  CRLF Chr(13) + Chr(10)
@@ -313,7 +344,7 @@ STATIC aTransRules   := {}, aTransResults := {}
 STATIC aCommRules    := {}, aCommResults  := {}
 
 STATIC bDbgMatch := .F., bDbgExp := .F., bDbgPPO := .F., bLoadRules := .T., ;
-       bCount := .T., bCCH := .F., bCompile := .F., bStrict := .T.
+       bCount := .T., bCCH := .F., bCompile := .T., bStrict := .T.
 
 STATIC nIfDef := 0, abIfDef := {}, nIf := 0, abIf := {}
 
@@ -325,7 +356,7 @@ STATIC s_bArrayPrefix := .F.
 
 STATIC s_sFile := "", s_sIncludeFile
 
-STATIC nRow, nCol
+STATIC s_nRow, s_nCol
 
 STATIC s_nProcId := 0, s_aProcedures := {}, s_xRet, s_nIfLevel := 0, ;
        s_aProcStack := {}, s_nProcStack := 0
@@ -342,7 +373,10 @@ STATIC s_acFlowType := {},  s_nFlowId := 0
    STATIC s_bRecursive := .F.
 #endif
 
-static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUILoaded := .F.
+STATIC s_lRunLoaded := .F., s_lDotLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUILoaded := .F.
+STATIC s_aSwitchDefs := {}
+
+STATIC s_sPending
 
 //--------------------------------------------------------------//
 #ifdef __HARBOUR__
@@ -352,7 +386,7 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
 #endif
 
    LOCAL sIncludePath, nNext, sPath, sSwitch := ""
-   LOCAL nAt, sParams, sPPOExt, aParams
+   LOCAL nAt, sParams, sPPOExt, aParams := {}
    LOCAL sDefine, sCH
 
    IF p1 != NIL
@@ -392,7 +426,7 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
       sSwitch += [    -D:E     = Show tracing information into the Expression Scanner.] + CRLF
       sSwitch += [    -D:M     = Show tracing information into the Match Engine.] + CRLF
       sSwitch += [    -D:P     = Show tracing information into the Output Generator.] + CRLF
-      sSwitch += [    -I<path> = #include file search path(s) (';' seperated).] + CRLF
+      sSwitch += [    -I<path> = #include file search path(s) ('] + OS_PATH_LIST_SEPARATOR + [' seperated).] + CRLF
       sSwitch += [    -P       = Generate .pp$ pre-processed output file.] + CRLF
       sSwitch += [    -R       = Run filename as a script.] + CRLF
       sSwitch += [    -FIX     = Do not clone Clipper PreProcessor bugs.] + CRLF
@@ -403,19 +437,37 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
       QUIT
    endif
 
+   #ifdef __PLATFORM__Linux
+      if right( hb_argv( 0 ), 6 ) == "/pprun"
+         bCount := .F.
+         bCompile := .T.
+         sSwitch := ""
+         aParams := { p1, p2, p3, p4, p5, p6, p7, p8, p9 }
+         aSize( aParams, PCount() )
+      endif
+   #endif
+
+   #ifdef _DEFAULT_INC_DIR
+      sPath := _DEFAULT_INC_DIR
+      IF ! ( Right( sPath, 1 ) $ OS_PATH_DELIMITER_LIST )
+         sPath += OS_PATH_DELIMITER
+      ENDIF
+      aAdd( s_asPaths, sPath )
+   #endif
+
    sIncludePath := GetE( "INCLUDE" )
 
-   WHILE ( nNext := At( ';', sIncludePath ) ) > 0
+   WHILE ( nNext := At( OS_PATH_LIST_SEPARATOR, sIncludePath ) ) > 0
       sPath := Left( sIncludePath, nNext - 1 )
-      IF ! ( Right( sPath, 1 ) $ '\/' )
-         sPath += '\'
+      IF ! ( Right( sPath, 1 ) $ OS_PATH_DELIMITER_LIST )
+         sPath += OS_PATH_DELIMITER
       ENDIF
       aAdd( s_asPaths, sPath )
       sIncludePath := SubStr( sIncludePath, nNext + 1 )
    ENDDO
    IF ! ( sIncludePath == '' )
-      IF ! ( Right( sIncludePath, 1 ) $ '\/' )
-         sIncludePath += '\'
+      IF ! ( Right( sIncludePath, 1 ) $ OS_PATH_DELIMITER_LIST )
+         sIncludePath += OS_PATH_DELIMITER
       ENDIF
       aAdd( s_asPaths, sIncludePath )
    ENDIF
@@ -423,6 +475,7 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
 #ifdef __CLIP__
    sIncludePath := StartPath()
    nAt := AtR( '/', sIncludePath )
+
    IF nAt <= 0
       nAt := AtR( "\", sIncludePath )
    ENDIF
@@ -430,17 +483,19 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
 
    IF nAt != 0
       sIncludePath := Left( sIncludePath, nAt - 1 )
-      IF ! ( Right( sIncludePath, 1 ) $ "\/" )
-            sIncludePath += '\'
+
+      IF ! ( Right( sIncludePath, 1 ) $ OS_PATH_DELIMITER_LIST )
+         sIncludePath += OS_PATH_DELIMITER
       ENDIF
+
       aAdd( s_asPaths, sIncludePath )
    ENDIF
 
-   IF Empty(getenv("CLIPROOT"))
-      aAdd( s_asPaths, cliproot()+"\include\" )
-   else
-      aAdd( s_asPaths, getenv("CLIPROOT")+"\include\" )
-   endif
+   IF Empty( GetEnv( "CLIPROOT" ) )
+      aAdd( s_asPaths, ClipRoot() + OS_PATH_DELIMITER + "include" + OS_PATH_DELIMITER )
+   ELSE
+      aAdd( s_asPaths, GetEnv( "CLIPROOT" ) + OS_PATH_DELIMITER + "include" + OS_PATH_DELIMITER )
+   ENDIF
 #endif
 
    IF ! Empty( sSwitch )
@@ -449,6 +504,7 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
       /* Generate compiled header. */
       IF "-CCH" $ sSwitch
          bCCH := .T.
+         bCompile := .F.
       ENDIF
 
       /* Debug tracing options. */
@@ -474,7 +530,8 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
 
          sDefine := SubStr( sSwitch, nAt + 2, nNext - 1 )
          sSwitch := Left( sSwitch, nAt - 1 ) + SubStr( sSwitch, nAt + 1 + nNext )
-         CompileDefine( sDefine )
+         //CompileDefine( sDefine )
+         aAdd( s_aSwitchDefs, sDefine )
       ENDDO
 
       /* Process command line include paths. */
@@ -485,17 +542,17 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
          ENDIF
          sIncludePath := SubStr( sSwitch, nAt + 2, nNext - 1 )
 
-         WHILE ( nNext := At( ';', sIncludePath ) ) > 0
+         WHILE ( nNext := At( OS_PATH_LIST_SEPARATOR, sIncludePath ) ) > 0
             sPath := Left( sIncludePath, nNext - 1 )
-            IF ! ( Right( sPath, 1 ) $ '\/' )
-               sPath += '\'
+            IF ! ( Right( sPath, 1 ) $ OS_PATH_DELIMITER_LIST )
+               sPath += OS_PATH_DELIMITER
             ENDIF
             aAdd( s_asPaths, sPath )
             sIncludePath := SubStr( sIncludePath, nNext + 1 )
          ENDDO
          IF ! ( sIncludePath == '' )
-            IF ! ( Right( sIncludePath, 1 ) $ '\/' )
-               sIncludePath += '\'
+            IF ! ( Right( sIncludePath, 1 ) $ OS_PATH_DELIMITER_LIST )
+               sIncludePath += OS_PATH_DELIMITER
             ENDIF
             aAdd( s_asPaths, sIncludePath )
          ENDIF
@@ -504,6 +561,7 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
       /* Generate .pp$ pre-processed output file. */
       IF "-P" $ sSwitch
          sPPOExt := ".pp$"
+         bCompile := .F.
       ENDIF
 
       /* Run file as a script. */
@@ -529,6 +587,7 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
          IF( ! sCH == "" )
             ? [Loading standard definitions from: '] + sCH + "'"
             ?
+
             CompileDefine( "__PP__" )
             #ifdef __HARBOUR__
                CompileDefine( "__HARBOUR__" )
@@ -548,14 +607,19 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
    ENDIF
 
    IF bLoadRules
+      bLoadRules := .F.
+
       InitRules()
       InitResults()
+
       IF Len( aDefRules ) != Len( aDefResults )
          Alert( [#DEFINE Rules size mismatch] )
       ENDIF
+
       IF Len( aTransRules ) != Len( aTransResults )
          Alert( [#TRANSLATE Rules size mismatch] )
       ENDIF
+
       IF Len( aCommRules ) != Len( aCommResults )
          Alert( [#DEFINE Rules size mismatch] )
       ENDIF
@@ -570,9 +634,25 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
       ENDIF
    ENDIF
 
-   IF sSource != NIL
-      nRow := Row()
-      nCol := Col()
+   // Command line defines.
+   #ifdef __XHARBOUR__
+       FOR EACH sDefine IN s_aSwitchDefs
+          CompileDefine( sDefine )
+       NEXT
+   #else
+       FOR nAt := 1 TO Len( s_aSwitchDefs )
+          CompileDefine( s_aSwitchDefs[ nAt ] )
+       NEXT
+   #endif
+
+   IF sSource == NIL
+      s_nRow := 2
+      s_nCol := 0
+
+      RP_Dot()
+   ELSE
+      s_nRow := Row()
+      s_nCol := Col()
 
       IF bCompile
          // Populate possible Command-line Parameters
@@ -593,13 +673,9 @@ static s_lRunLoaded := .F., s_lClsLoaded := .F., s_lFWLoaded := .F., s_lMiniGUIL
       ELSE
          PP_PreProFile( sSource, sPPOExt )
       ENDIF
-   ELSE
-      nRow := 2
-      nCol := 0
-      RP_Dot()
    ENDIF
 
-   DevPos( nRow, nCol )
+   DevPos( s_nRow, s_nCol )
 
 RETURN
 
@@ -825,28 +901,42 @@ PROCEDURE RP_Dot()
    LOCAL aCpyCommRules, aCpyCommResults
    LOCAL aCpyTranRules, aCpyTranResults
 
-   LOCAL aKBCommands := Array( 16 ), nKBCommand := 1, nKBCommands := 1, nTemp
+   LOCAL aKBCommands := Array( 16 ), nKBCommand := 1, nTemp, bKey5, bKey24
 
    #ifdef FW
-       Alert( [DOT mode (no filename parameter) is Not ready for GUI yet.] + CRLF + CRLF + [Please try Interpreter mode, using the -R switch...] )
+       Alert( [DOT mode (no filename parameter) is Not ready for GUI yet.] + [;;Please try Interpreter mode, using the -R switch...] )
        RETURN
    #endif
 
+   IF bLoadRules
+      bLoadRules := .F.
+
+      InitRules()
+      InitResults()
+   ENDIF
+
    bCount := .F.
 
-   PP_PreProFile( "rp_dot.ch" )
+   IF File( "rp_dot.ch" )
+      PP_PreProFile( "rp_dot.ch" )
+   ELSE
+      PP_LoadDot()
+   ENDIF
+
    #ifdef WIN
       PP_PreProLine( '#COMMAND Alert( <x> ) => MessageBox( 0, CStr( <x> ), "TInterpreter for Windows", 0 )' )
    #endif
 
-   aCpyDefRules     := aClone( aDefRules )
-   aCpyDefResults   := aClone( aDefResults )
+   #ifndef DONT_CLONE_RULES
+      aCpyDefRules     := aClone( aDefRules )
+      aCpyDefResults   := aClone( aDefResults )
 
-   aCpyCommRules    := aClone( aCommRules )
-   aCpyCommResults  := aClone( aCommResults )
+      aCpyCommRules    := aClone( aCommRules )
+      aCpyCommResults  := aClone( aCommResults )
 
-   aCpyTranRules   := aClone( aTransRules )
-   aCpyTranResults := aClone( aTransResults )
+      aCpyTranRules   := aClone( aTransRules )
+      aCpyTranResults := aClone( aTransResults )
+   #endif
 
    ErrorBlock( {|oErr| RP_Dot_Err( oErr ) } )
 
@@ -859,10 +949,9 @@ PROCEDURE RP_Dot()
              " | Index: " + Space( 8 ) + " | # " + Space( 7 ) + "/" + Space( 7 ), MaxCol() + 1 )  ;
               COLOR "N/BG"
 
-   aFill( aKBCommands, sLine )
+   DevPos( 02, 00 )
 
-   SetKey(  5, { || IIF( nKBCommand >  1, sLine := aKBCommands[ --nKBCommand ], ) } )
-   SetKey( 24, { || IIF( nKBCommand < 16, sLine := aKBCommands[ ++nKBCommand ], ) } )
+   aFill( aKBCommands, sLine )
 
    DO WHILE .T.
       sLine := aKBCommands[ nKBCommand ]
@@ -870,7 +959,14 @@ PROCEDURE RP_Dot()
       @ MaxRow(), 00 SAY '.'
       @ MaxRow(), 01 GET sLine PICTURE '@KS79'
       SET CURSOR ON
+
+      bKey5  := SetKey(  5, { || IIF( nKBCommand >  1, sLine := aKBCommands[ --nKBCommand ], ) } )
+      bKey24 := SetKey( 24, { || IIF( nKBCommand < 16, sLine := aKBCommands[ ++nKBCommand ], ) } )
+
       READ
+
+      SetKey(  5, bKey5  )
+      SetKey( 24, bKey24 )
 
       IF ! sLine == aKBCommands[ nKBCommand ]
          IF ( nTemp := aScan( aKBCommands, sLine ) ) == 0
@@ -879,9 +975,15 @@ PROCEDURE RP_Dot()
       ENDIF
 
       IF LastKey() == 27
-         EXIT
-      ELSEIF LastKey() == 13 .OR. LastKey == 24 .OR. LastKey() == 9
+         aKBCommands[ nKBCommand ] := Space( 256 )
+         LOOP
+      ELSEIF LastKey() == 13 .OR. LastKey() == 24 .OR. LastKey() == 9
          nKBCommand++
+         IF nKBCommand > 16
+            aDel( aKBCommands, 1 )
+            aKBCommands[16] := Space( 256 )
+            nKBCommand := 16
+         ENDIF
       ELSEIF LastKey() == 5 .OR. LastKey() == 271
          nKBCommand--
       ENDIF
@@ -892,20 +994,27 @@ PROCEDURE RP_Dot()
 
       //TraceLog( Len( aDefRules ), Len( aCommRules ), Len( aTransRules ) )
 
-      IF s_lRunLoaded
-         aDefRules     := aClone( aCpyDefRules )
-         aDefResults   := aClone( aCpyDefResults )
-
-         aCommRules    := aClone( aCpyCommRules )
-         aCommResults  := aClone( aCpyCommResults )
-
-         aTransRules   := aClone( aCpyTranRules )
-         aTransResults := aClone( aCpyTranResults )
-
-         s_lRunLoaded := .F.
-         s_lClsLoaded := .F.
-         s_lFWLoaded  := .F.
+      IF s_nRow >= MaxRow() - 1
+         Scroll( 2, 0, MaxRow() - 1, MaxCol(), 1 )
+         s_nRow := MaxRow() - 2
       ENDIF
+
+      #ifndef DONT_CLONE_RULES
+         IF s_lRunLoaded
+            aDefRules     := aClone( aCpyDefRules )
+            aDefResults   := aClone( aCpyDefResults )
+
+            aCommRules    := aClone( aCpyCommRules )
+            aCommResults  := aClone( aCpyCommResults )
+
+            aTransRules   := aClone( aCpyTranRules )
+            aTransResults := aClone( aCpyTranResults )
+
+            s_lRunLoaded := .F.
+            s_lClsLoaded := .F.
+            s_lFWLoaded  := .F.
+         ENDIF
+      #endif
 
    ENDDO
 
@@ -926,7 +1035,7 @@ STATIC PROCEDURE ExecuteLine( sPPed )
 
    @ 0,0 SAY "PP: "
    @ 0,4 SAY Pad( sPPed, 76 ) COLOR "N/R"
-   DevPos( nRow, nCol )
+   DevPos( s_nRow, s_nCol )
 
    BEGIN SEQUENCE
 
@@ -968,18 +1077,20 @@ STATIC PROCEDURE ExecuteLine( sPPed )
             sSymbol = "SETDOCASE" .OR. sSymbol = "SETCASE" .OR. sSymbol = "SETOTHERWISE" .OR. sSymbol = "SETENDCASE" .OR. ;
             abIf[ nIf ]
 
+            @ 0,0 SAY "PP: "
+            @ 0,4 SAY Pad( sBlock, 76 ) COLOR "N/R"
+            DevPos( s_nRow, s_nCol )
+
+            sBlock := "{|| " + sBlock + " }"
             #ifdef __CLIPPER__
                /* Clipper Macro Compiler can't compile nested blocks! */
                CompileNestedBlocks( sBlock, @sBlock )
             #endif
 
-            @ 0,0 SAY "PP: "
-            @ 0,4 SAY Pad( sBlock, 76 ) COLOR "N/R"
-            DevPos( nRow, nCol )
+            Eval( &sBlock )
 
-            Eval( &( "{|| " + sBlock + " }" ) )
-            nRow := Row()
-            nCol := Col()
+            s_nRow := Row()
+            s_nCol := Col()
 
             #ifdef __CLIPPER__
                nBlockID := 0
@@ -1028,26 +1139,23 @@ STATIC PROCEDURE ExecuteLine( sPPed )
             sSymbol = "SETDOCASE" .OR. sSymbol = "SETCASE" .OR. sSymbol = "SETOTHERWISE" .OR. sSymbol = "SETENDCASE" .OR. ;
             abIf[ nIf ]
 
-            #ifdef __CLIPPER__
-                /* Clipper Macro Compiler can't compile nested blocks! */
-                CompileNestedBlocks( sBlock, @sBlock )
-            #endif
-
             @ 0,0 SAY "PP: "
             @ 0,4 SAY Pad( sBlock, 76 ) COLOR "N/R"
-            DevPos( nRow, nCol )
+            DevPos( s_nRow, s_nCol )
 
-            Eval( &( "{|| " + sBlock + " }" ) )
-
+            sBlock := "{|| " + sBlock + " }"
             #ifdef __CLIPPER__
-               nBlockID := 0
-               aSize( s_abBlocks, 0 )
+               /* Clipper Macro Compiler can't compile nested blocks! */
+               CompileNestedBlocks( sBlock, @sBlock )
+               //TraceLog( sBlock )
             #endif
+
+            Eval( &sBlock )
          ENDIF
       ENDIF
 
-      nRow := Row()
-      nCol := Col()
+      s_nRow := Row()
+      s_nCol := Col()
 
       @ 0,0 SAY "PP: "
       @ 0,4 SAY Pad( sPPed, 76 ) COLOR "N/R"
@@ -1065,6 +1173,11 @@ STATIC PROCEDURE ExecuteLine( sPPed )
       ENDIF
    END SEQUENCE
 
+   #ifdef __CLIPPER__
+      nBlockID := 0
+      aSize( s_abBlocks, 0 )
+   #endif
+
 RETURN
 
 //--------------------------------------------------------------//
@@ -1081,7 +1194,7 @@ FUNCTION PP_CompileLine( sPPed, nLine, aProcedures, aInitExit, nProcId )
    ExtractLeadingWS( @sPPed )
    DropTrailingWS( @sPPed )
 
-   //TraceLog( sPPed, nLine )
+   //TraceLog( s_sModule, sPPed, nLine )
 
    BEGIN SEQUENCE
 
@@ -1856,7 +1969,11 @@ PROCEDURE PP_Privates( aVars )
          cInit := "NIL"
       ENDIF
 
-      IF aScan( s_asPrivates, aVars[nVar] ) == 0
+    #ifdef __XHARBOUR__
+      IF aScan( s_asPrivates, aVars[nVar], , , .T. ) == 0
+    #else
+      IF aScan( s_asPrivates, {|sPrivate| sPrivate == aVars[nVar] } ) == 0
+    #endif
          __QQPUB( aVars[nVar] )
          &( aVars[nVar] ) := &( cInit )
          aAdd( s_asPrivates, aVars[nVar] )
@@ -1905,7 +2022,11 @@ PROCEDURE PP_Publics( aVars )
          cInit := ".F."
       ENDIF
 
+    #ifdef __XHARBOUR__
       IF aScan( s_asPublics, aVars[nVar] ) == 0
+    #else
+      IF aScan( s_asPublics, {|sPublic| sPublic == aVars[nVar] } ) == 0
+    #endif
          __QQPUB( aVars[nVar] )
          &( aVars[nVar] ) := &( cInit )
          aAdd( s_asPublics, aVars[nVar] )
@@ -1935,7 +2056,11 @@ PROCEDURE PP_Statics( aVars )
          &( aVars[nVar] ) := &( cInit )
          aAdd( s_asStatics, aVars[nVar] )
       ELSE
-         IF aScan( aVars, aVars[nVar], 1, nVar - 1 ) > 0
+       #ifdef __XHARBOUR__
+         IF aScan( aVars, aVars[nVar], 1, nVar - 1, .T. ) > 0
+       #else
+         IF aScan( aVars, {|sVar| sVar == aVars[nVar] }, 1, nVar - 1 ) > 0
+       #endif
             Alert( [Type: ] + Type( aVars[nVar] ) + [ Static redeclaration: '] + aVars[nVar] )
          ENDIF
       ENDIF
@@ -1949,23 +2074,30 @@ PROCEDURE PP_Run( cFile, aParams, sPPOExt, bBlanks )
 
    LOCAL nBaseProc := s_nProcId, sPresetModule := s_sModule, nProc
 
-   //PP_PreProFile( "rp_run.ch" )
    IF bBlanks == NIL
       bBlanks := .T.
    ENDIF
 
    IF ! s_lRunLoaded
       s_lRunLoaded := .T.
-      InitRunRules()
-      InitRunResults()
-      IF Len( aDefRules ) != Len( aDefResults )
-         Alert( [Run #DEFINE Rules size mismatch] )
-      ENDIF
-      IF Len( aTransRules ) != Len( aTransResults )
-         Alert( [Run #TRANSLATE Rules size mismatch] )
-      ENDIF
-      IF Len( aCommRules ) != Len( aCommResults )
-         Alert( [Run #DEFINE Rules size mismatch] )
+
+      IF File( "rp_run.ch" )
+         PP_PreProFile( "rp_run.ch" )
+      ELSE
+         InitRunRules()
+         InitRunResults()
+
+         IF Len( aDefRules ) != Len( aDefResults )
+            Alert( [Run #DEFINE Rules size mismatch] )
+         ENDIF
+
+         IF Len( aTransRules ) != Len( aTransResults )
+            Alert( [Run #TRANSLATE Rules size mismatch] )
+         ENDIF
+
+         IF Len( aCommRules ) != Len( aCommResults )
+            Alert( [Run #DEFINE Rules size mismatch] )
+         ENDIF
       ENDIF
    ENDIF
 
@@ -1974,8 +2106,8 @@ PROCEDURE PP_Run( cFile, aParams, sPPOExt, bBlanks )
    IF s_sModule == cFile
       TraceLog( s_aProcedures, s_aInitExit, s_nProcId, aParams )
    ELSE
-      //s_nProcId := 0; s_aProcedures := {}; s_aInitExit := { {}, {} }
-      //s_asPrivates := {}; s_asPublics := {}; s_asLocals := {}; s_asStatics := {}; s_aParams := {}
+      s_nProcId := 0; s_aProcedures := {}; s_aInitExit := { {}, {} }
+      s_asPrivates := {}; s_asPublics := {}; s_asLocals := {}; s_asStatics := {}; s_aParams := {}
 
       s_sModule := cFile
       bCompile  := .T.
@@ -2011,10 +2143,10 @@ RETURN
 
 PROCEDURE RP_Dot_Err( oErr )
 
-   LOCAL Counter, xArg, sArgs := ""
+   LOCAL Counter, xArg, sArgs := ";"
 
-   IF ValType( oErr:Args ) == 'A'
-      sArgs := " - Arguments: "
+   IF ValType( oErr:Args ) == 'A' .AND. Len( oErr:Args ) > 0
+      sArgs := ";Arguments: "
 
       FOR Counter := 1 TO Len( oErr:Args )
          xArg := oErr:Args[Counter]
@@ -2048,10 +2180,9 @@ PROCEDURE RP_Dot_Err( oErr )
                sArgs +=  '[' + ValType( xArg ) + "]; "
          ENDCASE
       NEXT
-
-      sArgs := Left( sArgs, Len( sArgs ) -2 )
    ENDIF
 
+   TraceLog( [Sorry, could not execute: ] + oErr:Description + sArgs + " " + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
    Alert( [Sorry, could not execute: ] + oErr:Description + sArgs + " " + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
 
    BREAK
@@ -2062,10 +2193,10 @@ PROCEDURE RP_Dot_Err( oErr )
 
 PROCEDURE RP_PPText_Err( oErr, sLine, nLine )
 
-   LOCAL Counter, xArg, sArgs := ""
+   LOCAL Counter, xArg, sArgs := ";"
 
-   IF ValType( oErr:Args ) == 'A'
-      sArgs := " - Arguments: "
+   IF ValType( oErr:Args ) == 'A' .AND. Len( oErr:Args ) > 0
+      sArgs := ";Arguments: "
 
       FOR Counter := 1 TO Len( oErr:Args )
          xArg := oErr:Args[Counter]
@@ -2099,12 +2230,10 @@ PROCEDURE RP_PPText_Err( oErr, sLine, nLine )
                sArgs +=  '[' + ValType( xArg ) + "]; "
          ENDCASE
       NEXT
-
-      sArgs := Left( sArgs, Len( sArgs ) -2 )
    ENDIF
 
-   TraceLog( "Line: " + Str( nLine, 4 ) + " could not pre-process text: '" + sLine + "'; " + oErr:Description + sArgs + " " + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
-   Alert( [Line: ] + Str( nLine, 4 ) + [ could not compile: ]+"'" + sLine + "'; " + oErr:Description + sArgs + " " + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
+   TraceLog( [Line: ] + Str( nLine, 4 ) + [ could not compile: ] + "'" + sLine + "';" + oErr:Description + sArgs + ProcName(2) + '[' + Str( ProcLine(2) ) + ']' )
+   Alert( [Line: ] + Str( nLine, 4 ) + [ could not compile: ] + "'" + sLine + "';" + oErr:Description + sArgs + ProcName(2) + '[' + Str( ProcLine(2) ) + ']' )
 
    BREAK
 
@@ -2114,12 +2243,12 @@ PROCEDURE RP_PPText_Err( oErr, sLine, nLine )
 
 PROCEDURE RP_Comp_Err( oErr, sLine, nLine )
 
-   LOCAL Counter, xArg, sArgs := ""
+   LOCAL Counter, xArg, sArgs := ";"
 
    ErrorBlock( {|e| TraceLog( e:Description, e:SubSystem, e:SubCode, e:Args ), __Quit() } )
 
-   IF ValType( oErr:Args ) == 'A'
-      sArgs := "Arguments: "
+   IF ValType( oErr:Args ) == 'A' .AND. Len( oErr:Args ) > 0
+      sArgs := ";Arguments: "
 
       FOR Counter := 1 TO Len( oErr:Args )
          xArg := oErr:Args[Counter]
@@ -2153,12 +2282,10 @@ PROCEDURE RP_Comp_Err( oErr, sLine, nLine )
                sArgs +=  '[' + ValType( xArg ) + "]; "
          ENDCASE
       NEXT
-
-      sArgs := Left( sArgs, Len( sArgs ) -2 )
    ENDIF
 
-   TraceLog( "Line: " + Str( nLine, 4 ) + " could not compile: '" + sLine + "'; '" + oErr:Description + "'; " + sArgs + "; " + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
-   Alert( [Line: ] + Str( nLine, 4 ) + [ could not compile: ] + CRLF + "'" + sLine + "'" + CRLF + oErr:Description + CRLF + sArgs + CRLF + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
+   TraceLog( [Line: ] + Str( nLine, 4 ) + [ could not compile: ] + "'" + sLine + "'" + oErr:Description + sArgs + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
+   Alert( [Line: ] + Str( nLine, 4 ) + [ could not compile:] + ";'" + sLine + "';" + oErr:Description + sArgs + ProcName(2) + '[' + Str( ProcLine(2) ) + ']')
 
    BREAK
 
@@ -2168,14 +2295,14 @@ PROCEDURE RP_Comp_Err( oErr, sLine, nLine )
 
 FUNCTION RP_Run_Err( oErr, aProcedures, nLine )
 
-   LOCAL Counter, xArg, sArgs := "", nProc, sProc
+   LOCAL Counter, xArg, sArgs := ";", nProc, sProc
 
    IF nLine == NIL
       nLine := 0
    ENDIF
 
-   IF ValType( oErr:Args ) == 'A'
-      sArgs := "Arguments: "
+   IF ValType( oErr:Args ) == 'A' .AND. Len( oErr:Args ) > 0
+      sArgs := ";Arguments: "
 
       FOR Counter := 1 TO Len( oErr:Args )
          xArg := oErr:Args[Counter]
@@ -2209,8 +2336,6 @@ FUNCTION RP_Run_Err( oErr, aProcedures, nLine )
                sArgs +=  '[' + ValType( xArg ) + "]; "
          ENDCASE
       NEXT
-
-      sArgs := Left( sArgs, Len( sArgs ) -2 )
    ENDIF
 
    IF oErr:SubCode == 1001
@@ -2238,17 +2363,17 @@ FUNCTION RP_Run_Err( oErr, aProcedures, nLine )
          IF oErr:CanSubstitute
             RETURN ( s_xRet )
          ELSEIF oErr:CanDefault
-            Alert( [Must Default: ] + "'" + oErr:Operation + "' '" + oErr:Description + CRLF + ;
-						       sArgs + CRLF + ;
-									 PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + CRLF + ;
+            Alert( [Must Default: ] + "'" + oErr:Operation + "' '" + oErr:Description + ;
+                   sArgs + ";" + ;
+                   PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ");" + ;
 									 ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
 
             RETURN  ( .F. )
          ELSE
-            Alert( [No Recovery for: ] + "'" + oErr:Operation + "' " + oErr:Description + CRLF + ;
-						       sArgs + " " + CRLF + ;
-									 PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + CRLF + ;
-									 ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
+            Alert( [No Recovery for: ] + "'" + oErr:Operation + "' " + oErr:Description + ;
+                   sArgs + ;
+                   PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ");" + ;
+                   ProcName(2) + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
 
             oErr:Cargo := nProc
             BREAK oErr
@@ -2257,13 +2382,12 @@ FUNCTION RP_Run_Err( oErr, aProcedures, nLine )
    ENDIF
 
    TraceLog( s_sModule, nLine, "Sorry, R/T Error: [" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) +  "] '" + oErr:Operation + "' '" + oErr:Description + "' " + sArgs + " " + PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
-
-   Alert( [Line: ] + Str( nLine ) + [ R/T Error: ] + "[" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) + "] '" + oErr:Operation + "' " + CRLF + ;
-	        oErr:Description + CRLF + ;
-					sArgs + CRLF + ;
-					PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ") " + CRLF + ;
+   //TraceLog( s_sModule, nLine, oErr:Description, oErr:SubSystem, oErr:Operation, sArgs, PP_ProcName() )
+   Alert( [Line: ] + Str( nLine ) + [ R/T Error: ] + "[" + oErr:SubSystem + "/" + LTrim( Str( oErr:SubCode ) ) + "] '" + oErr:Operation + "';" + ;
+          oErr:Description + ;
+          sArgs + ;
+          PP_ProcName() + '(' + LTrim( Str( PP_ProcLine() ) ) + ");" + ;
 					ProcName(2)  + "(" + LTrim( Str( ProcLine(2) ) ) + ")" )
-
    //BREAK oErr
    __Quit()
 
@@ -2412,54 +2536,61 @@ RETURN nIf
 
    FUNCTION asBlocks( sBlock, asBlocks )
 
-      LOCAL nStart, nEnd, nPosition, sNested, nOpen, lBlock := .F.
+      LOCAL nStart := 1, nEnd := Len( sBlock ), nPosition, sNested, nOpen, ;
+            lBlock := .F., cChar
 
       IF asBlocks == NIL
          asBlocks := {}
       ENDIF
 
-      nStart := At( '{', sBlock )
-      IF nStart > 0
-         nEnd   := Len( sBlock )
+      WHILE ( nStart := nAtSkipStr( '{', sBlock, nStart ) ) > 0
          FOR nPosition := nStart + 1 TO nEnd
             IF SubStr( sBlock, nPosition, 1 ) != ' '
                EXIT
             ENDIF
          NEXT
-         IF SubStr( sBlock, nPosition, 1 ) == '|'
-            lBlock := .T.
+         IF SubStr( sBlock, nPosition, 1 ) != '|'
+            nStart++
+            LOOP
          ENDIF
 
+         nPosition++
          nOpen := 1
+
          DO WHILE nOpen > 0 .AND. nPosition <= nEnd
-            IF SubStr( sBlock, nPosition, 1 ) == '"'
+            cChar := SubStr( sBlock, nPosition, 1 )
+
+            IF cChar == '"'
                DO WHILE nPosition <= nEnd
                   nPosition++
                   IF SubStr( sBlock, nPosition, 1 ) == '"'
                      EXIT
                   ENDIF
                ENDDO
-            ELSEIF SubStr( sBlock, nPosition, 1 ) == "'"
+            ELSEIF cChar == "'"
                DO WHILE nPosition <= nEnd
                   nPosition++
                   IF SubStr( sBlock, nPosition, 1 ) == "'"
                      EXIT
                   ENDIF
                ENDDO
-            ELSEIF SubStr( sBlock, nPosition, 1 ) == '{'
+            ELSEIF cChar == '{'
                nOpen++
-            ELSEIF SubStr( sBlock, nPosition, 1 ) == '}'
+            ELSEIF cChar == '}'
                nOpen--
             ENDIF
+
             nPosition++
          ENDDO
-      ENDIF
 
-      IF lBlock
          sNested := SubStr( sBlock, nStart, ( nPosition - nStart ) )
+         //TraceLog( asBlocks, sNested )
+
          aAdd( asBlocks, sNested )
          asBlocks( SubStr( sBlock, nPosition + 1 ), asBlocks )
-      ENDIF
+
+         nStart := nPosition
+      ENDDO
 
    RETURN asBlocks
 
@@ -2480,7 +2611,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
    LOCAL nLen, nMaxPos, cChar := '', nClose, nBase, nNext, nLine := 0
    LOCAL sRight, nPath := 0, nPaths := Len( s_asPaths ), nNewLine
    LOCAL sPath := "", cError, sPrevFile := s_sFile
-   LOCAL sTmp
+   LOCAL sTmp, nLastPosition := 0
 
    IF At( '.', sSource ) == 0
      sSource += ".prg"
@@ -2550,8 +2681,6 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
       nPosition := 1
       nMaxPos   := nLen - 1
 
-      //TraceLog( sLine, sBuffer )
-
       WHILE nPosition < nMaxPos
 
           cPrev := cChar
@@ -2560,13 +2689,13 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
           DO CASE
              CASE ( cChar == '/' .AND. SubStr( sBuffer, nPosition + 1, 1 ) == '*' )
                 nPosition++
+
                 WHILE .T.
-                   nClose := At( "*/", SubStr( sBuffer, nPosition + 1 ) )
+                   nClose := At( "*/", sBuffer, nPosition + 1 )
 
                    IF nClose == 0
-                      nBase := nPosition + 2
-                      WHILE ( nNext := At( Chr(10), SubStr( sBuffer, nBase ) ) ) > 0
-
+                      nNext := nPosition + 2
+                      WHILE ( nNext := At( Chr(10), sBuffer, nNext ) ) > 0
                          nLine++
                          IF bCount
                             @ Row(), 0 SAY nLine
@@ -2575,7 +2704,8 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                          IF bBlanks
                             FWrite( hPP, CRLF )
                          ENDIF
-                         nBase += ( nNext + 1 )
+
+                         nNext++
                       ENDDO
 
                       //FSeek( hSource, -1, 1 )
@@ -2584,11 +2714,14 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                          Alert( [ERROR! Unterminated '/**/' ] + "[" + Str( ProcLine() ) + "]" )
                       ENDIF
                       nMaxPos   := nLen - 1
+                      TraceLog( "***" )
                       nPosition := 0
                       LOOP
                    ELSE
-                      nBase := nPosition + 1
-                      WHILE ( nNext := At( Chr(10), SubStr( sBuffer, nBase ) ) ) > 0 .AND. ( nBase + nNext - nPosition ) <= nClose + 1
+                      nNext := nPosition + 1
+                      nClose -= nPosition
+
+                      WHILE ( nNext := At( Chr(10), sBuffer, nNext ) ) > 0 .AND. ( nNext - nPosition ) <= nClose + 1
                          nLine++
                          IF bCount
                             @ Row(), 0 SAY nLine
@@ -2596,7 +2729,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                          IF bBlanks
                             FWrite( hPP, CRLF )
                          ENDIF
-                         nBase += ( nNext + 1 )
+                         nNext++
                       ENDDO
 
                       nPosition += ( nClose + 1 )
@@ -2608,7 +2741,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
              CASE ( cChar == '/' .AND. SubStr( sBuffer, nPosition + 1, 1 ) == '/' )
                 nPosition++
                 WHILE .T.
-                   nClose := At( Chr(10), SubStr( sBuffer, nPosition + 1 ) )
+                   nClose := At( Chr(10), sBuffer, nPosition + 1 )
 
                    IF nClose == 0
                       //FSeek( hSource, -1, 1 )
@@ -2617,10 +2750,13 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                          BREAK "//"
                       ENDIF
                       nMaxPos   := nLen - 1
+                      TraceLog( "***" )
                       nPosition := 0
                       LOOP
                    ELSE
+                      nClose -= nPosition
                       nLine++
+
                       IF bCount
                          @ Row(), 0 SAY nLine
                       ENDIF
@@ -2670,7 +2806,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
              CASE ( cChar == '&' .AND. SubStr( sBuffer, nPosition + 1, 1 ) == '&' )
                 nPosition++
                 WHILE .T.
-                   nClose := At( Chr(10), SubStr( sBuffer, nPosition + 1 ) )
+                   nClose := At( Chr(10), sBuffer, nPosition + 1 )
 
                    IF nClose == 0
                       //FSeek( hSource, -1, 1 )
@@ -2679,9 +2815,11 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                          BREAK "&&"
                       ENDIF
                       nMaxPos   := nLen - 1
+                      TraceLog( "***" )
                       nPosition := 0
                       LOOP
                    ELSE
+                      nClose -= nPosition
                       nLine++
                       IF bCount
                          @ Row(), 0 SAY nLine
@@ -2708,7 +2846,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
              CASE ( cChar == '*' )
                 IF LTrim( sLine ) == ''
                    WHILE .T.
-                      nClose := At( Chr(10), SubStr( sBuffer, nPosition + 1 ) )
+                      nClose := At( Chr(10), sBuffer, nPosition + 1 )
 
                       IF nClose == 0
                          //FSeek( hSource, -1, 1 )
@@ -2720,6 +2858,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                          nPosition := 1
                          LOOP
                       ELSE
+                         nClose -= nPosition
                          nLine++
                          IF bCount
                             @ Row(), 0 SAY nLine
@@ -2735,10 +2874,41 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                    ENDDO
                 ENDIF
 
+          #ifdef __PLATFORM__Linux
+             CASE ( nLine == 0 .AND. nPosition == 1 .AND. cChar == '#' .AND. SubStr( sBuffer, nPosition + 1, 1 ) == '!' )
+                WHILE .T.
+                   nClose := At( Chr(10), sBuffer, nPosition + 1 )
+
+                   IF nClose == 0
+                      //FSeek( hSource, -1, 1 )
+                      nLen := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
+                      IF nLen < 2
+                         BREAK "*"
+                      ENDIF
+                      nMaxPos   := nLen - 1
+                      nPosition := 1
+                      LOOP
+                   ELSE
+                      nClose -= nPosition
+                      nLine++
+                      IF bCount
+                         @ Row(), 0 SAY nLine
+                      ENDIF
+                      IF bBlanks
+                         FWrite( hPP, CRLF )
+                      ENDIF
+                      nPosition += ( nClose )
+                      sLine := ''
+                      cChar := ''
+                      EXIT
+                   ENDIF
+                ENDDO
+          #endif
+
              CASE ( cChar == '"' )
                 WHILE .T.
-                   nClose := At( '"', SubStr( sBuffer, nPosition + 1 ) )
-                   nNewLine := At( Chr(10), SubStr( sBuffer, nPosition + 1 ) )
+                   nClose := At( '"', sBuffer, nPosition + 1 )
+                   nNewLine := At( Chr(10), sBuffer, nPosition + 1 )
 
                    IF nNewLine > 0 .AND. ( nClose == 0 .OR. nClose > nNewLine )
                       EXIT
@@ -2752,6 +2922,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                       nPosition := 1
                       LOOP
                    ELSE
+                      nClose    -= nPosition
                       sLine     += SubStr( sBuffer, nPosition, nClose )
                       nPosition += ( nClose )
                       EXIT
@@ -2760,8 +2931,8 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
 
              CASE ( cChar == "'" )
                 WHILE .T.
-                   nClose   := At( "'", SubStr( sBuffer, nPosition + 1 ) )
-                   nNewLine := At( Chr(10), SubStr( sBuffer, nPosition + 1 ) )
+                   nClose   := At( "'", sBuffer, nPosition + 1 )
+                   nNewLine := At( Chr(10), sBuffer, nPosition + 1 )
 
                    IF nNewLine > 0 .AND. ( nClose == 0 .OR. nClose > nNewLine )
                       EXIT
@@ -2775,6 +2946,7 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                       nPosition := 1
                       LOOP
                    ELSE
+                      nClose    -= nPosition
                       sLine     += SubStr( sBuffer, nPosition, nClose )
                       nPosition += ( nClose )
                       EXIT
@@ -2789,8 +2961,8 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                 ENDIF
 
                 WHILE .T.
-                   nClose   := At( ']', SubStr( sBuffer, nPosition + 1 ) )
-                   nNewLine := At( Chr(10), SubStr( sBuffer, nPosition + 1 ) )
+                   nClose   := At( ']', sBuffer, nPosition + 1 )
+                   nNewLine := At( Chr(10), sBuffer, nPosition + 1 )
 
                    IF nNewLine > 0 .AND. ( nClose == 0 .OR. nClose > nNewLine )
                       EXIT
@@ -2804,11 +2976,13 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks, bDirectivesOnly )
                       nPosition := 1
                       LOOP
                    ELSE
+                      nClose    -= nPosition
                       sLine     += SubStr( sBuffer, nPosition, nClose )
                       nPosition += ( nClose )
                       EXIT
                    ENDIF
                 ENDDO
+
                 IF nClose > 0 .AND. nClose < nNewLine
                    cChar := ']'
                 ENDIF
@@ -2974,6 +3148,15 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
    LOCAL sError
    LOCAL sBackupLine
    LOCAL sSkipped
+   LOCAL bArrayPrefix
+
+   #ifdef __XHARBOUR__
+      LOCAL sTemp
+   #else
+      LOCAL nPendingLine
+   #endif
+
+   //TraceLog( sLine )
 
    IF Left( LTrim( sLine ), 1 ) != '#'
        nPosition := 0
@@ -3014,6 +3197,7 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
       IF nCycles < MAX_CICLES
          nCycles++
       ELSE
+         TraceLog( "Circularity!", sLine )
          Alert( [ERROR! Circularity detected ]+"[" + sSource + "(" + LTrim( Str( nLine ) ) + ")]" )
          ? sLine
          BREAK
@@ -3107,6 +3291,30 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
 
          ExtractLeadingWS( @sLine )
 
+         #ifdef __XHARBOUR__
+            FOR EACH sTemp IN aPendingLines
+               IF sTemp != NIL .AND. sTemp[1] != '#'
+                  sLine += '; ' + sTemp
+                  sTemp := NIL
+               ELSE
+                  EXIT
+               ENDIF
+            NEXT
+         #else
+            FOR nPendingLine := 1 TO nLendingLines
+               IF aPendingLines[ nPendingLine ] != NIL .AND. Left( aPendingLines[ nPendingLine ], 1 ) != '#'
+                  sLine += '; ' + aPendingLines[ nPendingLine ]
+                  aPendingLines[ nPendingLine ] := NIL
+               ELSE
+                  EXIT
+               ENDIF
+            NEXT
+         #endif
+
+         #ifdef OUTPUT_DIRECTIVES
+            aAdd( asOutLines, "/* #" + sDirective + " " + sLine + " */"  )
+         #endif
+
          IF sDirective == Left( "DEFINE", nLen )
 
             CompileDefine( sLine )
@@ -3139,14 +3347,13 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
 
          ELSEIF sDirective == Left( "INCLUDE", nLen )
 
-
             ExtractLeadingWS( @sLine )
             DropTrailingWS( @sLine )
 
             // Strip the ""
-            sLine := Upper( SubStr( sLine, 2, Len( sLine ) - 2 ) )
+            sLine := SubStr( sLine, 2, Len( sLine ) - 2 )
 
-            IF sLine == "HBCLASS.CH"
+            IF Upper( sLine ) == "HBCLASS.CH"
                IF ! s_lClsLoaded
                   s_lClsLoaded := .T.
                   InitClsRules()
@@ -3161,8 +3368,9 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                      Alert( [Class #DEFINE Rules size mismatch] )
                   ENDIF
                ENDIF
-          #ifdef __HARBOUR__
-            ELSEIF sLine == "FIVEWIN.CH"
+
+          #ifdef FW
+            ELSEIF Upper( sLine ) == "FIVEWIN.CH"
                IF ! s_lFWLoaded
                   s_lFWLoaded := .T.
                   IF ! s_lClsLoaded
@@ -3191,7 +3399,10 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                      Alert( [FW #DEFINE Rules size mismatch] )
                   ENDIF
                ENDIF
-            ELSEIF sLine == "MINIGUI.CH"
+          #endif
+
+          #ifdef MINIGUI
+            ELSEIF Upper( sLine ) == "MINIGUI.CH"
                IF ! s_lMiniGUILoaded
                   s_lMiniGUILoaded := .T.
                   IF ! s_lClsLoaded
@@ -3221,6 +3432,7 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                   ENDIF
                ENDIF
           #endif
+
             ELSE
                PP_PreProFile( sLine ) // Intentionally not using s_sIncludeFile
 
@@ -3278,6 +3490,8 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
       ENDIF
 
       //TraceLog( sLine )
+      s_sPending := ""
+      aEval( aPendingLines, {|s| IIF( s != NIL, s_sPending += '; ' + s, ) } )
 
       sBackupLine := sLine
       sPassed     := ""
@@ -3286,6 +3500,13 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
          //WAIT
 
          sPassed += sSkipped
+
+         // Save incase MatchRule fails.
+         #ifdef USE_C_BOOST
+            bArrayPrefix := GetArrayPrefix()
+         #else
+            bArrayPrefix := s_bArrayPrefix
+         #endif
 
          IF ( nRule := MatchRule( sToken, @sLine, aDefRules, aDefResults, .F., .F. ) ) > 0
             //? "DEFINED: " + sLine
@@ -3304,11 +3525,23 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                aIns( aPendingLines, nPosition )
                aPendingLines[ nPosition ] := Left( sLine, nNewLineAt - 1 )
 
+               #ifdef REVIEW
+                  IF Left( aPendingLines[ nPosition ], 1 ) == '#' .AND. ! bCompile
+                     aAdd( asOutLines, aPendingLines[ nPosition ] )
+                  ENDIF
+               #endif
+
                //? "Pending #", nPendingLines,  Left( sLine, nNewLineAt - 1 ), aPendingLines[nPendingLines]
                sLine := LTrim( SubStr( sLine, nNewLineAt + 1 ) )
             ENDDO
 
             IF nPosition == 0
+               #ifdef REVIEW
+                  IF Left( sLine, 1 ) == '#' .AND. ! bCompile
+                     aAdd( asOutLines, sLine )
+                  ENDIF
+               #endif
+
                sLine := sLeft + sPassed + sLine
             ELSE
                IF ! Empty( sLine )
@@ -3330,6 +3563,13 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
 
             // Re-Reprocess the line ...
             BREAK
+         ELSE
+            // Restore since MatchRule() faild.
+            #ifdef USE_C_BOOST
+               SetArrayPrefix( bArrayPrefix )
+            #else
+               s_bArrayPrefix := bArrayPrefix
+            #endif
          ENDIF
 
          sPassed += sToken
@@ -3344,6 +3584,14 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
       DO WHILE ( sToken := NextToken( @sLine ) ) != NIL
          //? "Token = '"  + sToken + "'"
          //WAIT
+
+         // Save incase MatchRule fails.
+         #ifdef USE_C_BOOST
+            bArrayPrefix := GetArrayPrefix()
+         #else
+            bArrayPrefix := s_bArrayPrefix
+         #endif
+
          IF ( nRule := MatchRule( sToken, @sLine, aTransRules, aTransResults, .F., .T. ) ) > 0
             //? "TRANSLATED: " + sLine
             //WAIT
@@ -3354,6 +3602,10 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                aAdd( aTranslated, nRule )
             ENDIF
 
+            IF Empty( s_sPending )
+               nPendingLines := 0
+               aSize( aPendingLines, 0 )
+            ENDIF
 
             nPosition := 0
             WHILE ( nNewLineAt := nAtSkipStr( ';', sLine ) ) > 0
@@ -3366,11 +3618,23 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
                aIns( aPendingLines, nPosition )
                aPendingLines[ nPosition ] := Left( sLine, nNewLineAt - 1 )
 
+               #ifdef REVIEW
+                  IF Left( aPendingLines[ nPosition ], 1 ) == '#' .AND. ! bCompile
+                     aAdd( asOutLines, aPendingLines[ nPosition ] )
+                  ENDIF
+               #endif
+
                //? "Pending #", nPendingLines,  Left( sLine, nNewLineAt - 1 ), aPendingLines[nPendingLines]
                sLine := SubStr( sLine, nNewLineAt + 1 )
             ENDDO
 
             IF nPosition == 0
+               #ifdef REVIEW
+                  IF Left( sLine, 1 ) == '#' .AND. ! bCompile
+                     aAdd( asOutLines, sLine )
+                  ENDIF
+               #endif
+
                sLine := sLeft + sPassed + sLine
             ELSE
                IF ! Empty( sLine )
@@ -3390,6 +3654,13 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
             ENDIF
 
             BREAK
+         ELSE
+            // Restore since MatchRule() faild.
+            #ifdef USE_C_BOOST
+               SetArrayPrefix( bArrayPrefix )
+            #else
+               s_bArrayPrefix := bArrayPrefix
+            #endif
          ENDIF
 
          sPassed += sToken
@@ -3413,6 +3684,11 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
          ENDIF
          */
 
+         IF Empty( s_sPending )
+            nPendingLines := 0
+            aSize( aPendingLines, 0 )
+         ENDIF
+
          nPosition := 0
          WHILE ( nNewLineAt := nAtSkipStr( ';', sLine ) ) > 0
             nPendingLines++
@@ -3424,11 +3700,23 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
             aIns( aPendingLines, nPosition )
             aPendingLines[ nPosition ] := Left( sLine, nNewLineAt - 1 )
 
+            #ifdef REVIEW
+               IF Left( aPendingLines[ nPosition ], 1 ) == '#' .AND. ! bCompile
+                  aAdd( asOutLines, aPendingLines[ nPosition ] )
+               ENDIF
+            #endif
+
             //? "Pending #", nPendingLines,  Left( sLine, nNewLineAt - 1 ), aPendingLines[nPosition]
             sLine := LTrim( SubStr( sLine, nNewLineAt + 1 ) )
          ENDDO
 
          IF nPosition == 0
+            #ifdef REVIEW
+               IF Left( sLine, 1 ) == '#' .AND. ! bCompile
+                  aAdd( asOutLines, sLine )
+               ENDIF
+            #endif
+
             sLine := sLeft + sLine
          ELSE
             IF ! Empty( sLine )
@@ -3490,6 +3778,7 @@ FUNCTION PP_PreProLine( sLine, nLine, sSource )
    IF ! Empty( sOut )
       //? "Returning: " + sOut
       //WAIT
+      //TraceLog( sOut )
    ENDIF
 
    IF bCompile
@@ -3751,6 +4040,11 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                             EXIT
                          ENDIF
                       ENDDO
+
+                      // Added June-1-2003 (yes I know it's a commented section.)
+                      IF nMatch == 1 .AND. aRules[nRule][2][nMatch][2] == 0
+                         nMatch++
+                      ENDIF
                   #endif
 
                   /* Now search for the stopper. */
@@ -3759,7 +4053,11 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                      aMP := aRules[nRule][2][nMatch]
 
                      IF aMP[3] == NIL .AND. aMP[4] == ':'
+                      #ifdef __XHARBOUR__
+                        IF aScan( aMP[5], sMultiStopper, , , .T. ) > 0
+                      #else
                         IF aScan( aMP[5], {|sWord| sWord == sMultiStopper } ) > 0
+                      #endif
                            EXIT
                         ENDIF
                      ELSE
@@ -4030,6 +4328,10 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                         ENDIF
                      ENDDO
                   ENDIF
+                  // Added June-1-2003
+                  IF nMatch == 1 .AND. aRules[nRule][2][nMatch][2] == 0
+                     nMatch++
+                  ENDIF
 
                   nOptional := 0
 
@@ -4129,11 +4431,15 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                               EXIT
                            ENDIF
                         ENDDO
+                        // Added June-1-2003
+                        IF nMatch == 1 .AND. aRules[nRule][2][nMatch][2] == 0
+                           nMatch++
+                        ENDIF
 
                         nOptional := 0
 
                         IF bDbgMatch
-                           ? "Nested last optional, Rewinded to:", nMatch
+                           ? "1 - Nested last optional, Rewinded to:", nMatch
                         ENDIF
 
                         LOOP
@@ -4164,7 +4470,7 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                      /* Skip dependents and nested optionals, if any. */
                      nTemp := aMP[2]
                      nMatch++
-                     WHILE nMatch <= nMatches .AND. Abs( aRules[nRule][2][nMatch][2] ) >= nTemp
+                     WHILE ( nMatch <= nMatches ) .AND. ( Abs( aRules[nRule][2][nMatch][2] ) >= nTemp )
                         nMatch++
                      ENDDO
 
@@ -4179,11 +4485,15 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
                               EXIT
                            ENDIF
                         ENDDO
+                        // Added June-1-2003
+                        IF nMatch == 1 .AND. aRules[nRule][2][nMatch][2] == 0
+                           nMatch++
+                        ENDIF
 
                         nOptional := 0
 
                         IF bDbgMatch
-                           ? "Nested last optional, Rewinded to:", nMatch
+                           ? "2 - Nested last optional, Rewinded to:", nMatch
                         ENDIF
 
                         LOOP
@@ -4380,8 +4690,9 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
    LOCAL sReturn, Counter, nLen, nClose
    LOCAL s1, s2, s3
    LOCAL sDigits
+   LOCAL sToken
 
-   //TRaceLog( sLine, lDontRecord )
+   //TraceLog( sLine, lDontRecord )
 
    IF Empty( sLine )
       RETURN NIL
@@ -4403,7 +4714,7 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
 
          s2 := Left( sLine, 2 )
 
-         IF s2 $ "++\--\->\:=\==\!=\<>\>=\<=\+=\-=\*=\^=\**\/=\%=\??"
+         IF s2 $ "++\--\->\:=\==\!=\<>\>=\<=\+=\-=\*=\^=\**\/=\%="
 
             sReturn := s2
 
@@ -4473,7 +4784,7 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
                EXIT
             ENDIF
 
-            sDigits+= s1
+            sDigits += s1
          NEXT
 
          // Must have accumulated decimal digits.
@@ -4526,24 +4837,24 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
 
       ELSEIF s1 == '"'
 
-         nClose := AT( '"', SubStr( sLine, 2 ) )
+         nClose := AT( '"', sLine, 2 )
          IF nClose == 0
             //Alert( 'ERROR! [NextToken()] Unterminated ["] at: ' + sLine )
             sReturn := '"'
          ELSE
-            sReturn := Left( sLine, nClose + 1 )
+            sReturn := Left( sLine, nClose )
          ENDIF
 
          BREAK
 
       ELSEIF s1 == "'"
 
-         nClose := AT( "'", SubStr( sLine, 2 ) )
+         nClose := AT( "'", sLine, 2 )
          IF nClose == 0
             //Alert( "ERROR! [NextToken()] Unterminated ['] at: " + sLine )
             sReturn := "'"
          ELSE
-            sReturn := SubStr( sLine, 2, nClose - 1 )
+            sReturn := SubStr( sLine, 2, nClose - 2 )
             IF ! ( '"' $ sReturn )
                sReturn := '"' + sReturn + '"'
             ELSE
@@ -4600,12 +4911,22 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
 
    sLine := SubStr( sLine, Len( sReturn ) + 1 )
 
-   IF lDontRecord != .T.
+   IF lDontRecord == .F.
       IF Left( sReturn, 1 ) == '.' .AND. Len( sReturn ) > 1 .AND. Right( sReturn, 1 ) == '.'
          s_bArrayPrefix := .F.
       ELSE
          s1             := Right( sReturn, 1 )
-         s_bArrayPrefix := ( IsAlpha( s1 ) .OR. IsDigit( s1 ) .OR. s1 $ "])}._" )
+
+         IF Upper( s1 ) == 'R'
+            sToken := Upper( sReturn )
+            IF sToken == "RETU" .OR. sToken == "RETUR" .OR. sToken == "RETURN"
+               s_bArrayPrefix := .F.
+            ELSE
+               s_bArrayPrefix := .T.
+            ENDIF
+         ELSE
+            s_bArrayPrefix := ( IsAlpha( s1 ) .OR. IsDigit( s1 ) .OR. s1 $ "])}._" )
+         ENDIF
       ENDIF
    ENDIF
 
@@ -4630,7 +4951,7 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
 
    #endif
 
-   //TraceLog( "TOKEN = '" + sReturn, sLine, s_bArrayPrefix )
+   //TraceLog( "TOKEN = >" + sReturn + "<", sLine, s_bArrayPrefix )
 
 RETURN sReturn
 
@@ -4732,23 +5053,31 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
      CASE cType == '*'
         sExp  := sLine
         sLine := ""
+        IF ! Empty( s_sPending )
+           sExp += s_sPending
+           s_sPending := ""
+        ENDIF
+
         //? "EXP <*>: " + sExp
         RETURN sExp
 
-     CASE cType == '(' .AND. Left( sLine, 1 ) != '('
-        nSpaceAt := At( ' ', sLine )
+     CASE cType == '('
+        s1 := Left( sLine, 1 )
+        IF ! ( s1 $ "&(['" + '"' )
+            nSpaceAt := At( ' ', sLine )
 
-        IF nSpaceAt = 0
-           sExp  := sLine
-           sLine := ""
-        ELSE
-           sExp  := Left( sLine, nSpaceAt - 1 )
-           sLine := SubStr( sLine, nSpaceAt )
-           sExp  += ExtractLeadingWS( @sLine )
+            IF nSpaceAt = 0
+               sExp  := sLine
+               sLine := ""
+            ELSE
+               sExp  := Left( sLine, nSpaceAt - 1 )
+               sLine := SubStr( sLine, nSpaceAt )
+               sExp  += ExtractLeadingWS( @sLine )
+            ENDIF
+
+            //? "EXP <(>: " + sExp
+            RETURN sExp
         ENDIF
-
-        //? "EXP <(>: " + sExp
-        RETURN sExp
 
      CASE cType == '!'
         IF IsAlpha( cChar := Left( sLine, 1 ) ) .OR. cChar == '_'
@@ -4822,11 +5151,13 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
 
      IF nLen == 1
 
-        IF s1 $ "-+!:@|" // *** Very ODD Clipper consider '|' a continuation token !!!
+        IF s1 $ "-+!:@|." // *** Very ODD Clipper consider '|' and '.' a continuation token !!!
            sExp += sToken
            LOOP
+
         ELSEIF s1 == "&"
            sExp += sToken
+
            IF sNext1 == '('
               LOOP
            ELSE
@@ -4866,6 +5197,8 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
                              #endif
                           ENDIF
                        ENDIF
+                    ELSEIF sNextToken == '&' //(Last Token) Get the next Macro suffix.
+                       sExp += NextExp( @sLine, cType, aWords, sNextAnchor, bX )
                     ENDIF
                  ENDIF
               ELSE
@@ -4874,8 +5207,14 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
               ENDIF
            ENDIF
 
-            sLastToken := RTrim( sLastToken )
+           sLastToken := RTrim( sLastToken )
+
+           IF Left( sLine, 1 ) == '.'
+              LOOP
+           ENDIF
+
            // Continue  2nd level checks below.
+
         ELSEIF s1 == '('
            sExp += sToken
            IF Left( sNext1, 1 ) == ')'
@@ -5056,7 +5395,7 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
 
            sLastToken := "]"
            // Continue  2nd level checks below.
-        ELSEIF s1 $ ".*/=^><!$%#)}]?"
+        ELSEIF s1 $ "*/=^><!$%#)}]?"
            sLine := sToken + sLine
            EXIT
         ELSEIF s1 == ","
@@ -5083,7 +5422,7 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
         IF s2 $ '++\--'
            sExp += sToken
            LOOP
-        ELSEIF s2 $ "->\:=\==\!=\<>\>=\<=\+=\-=\*=\^=\**\/=\%=\??"
+        ELSEIF s2 $ "->\:=\==\!=\<>\>=\<=\+=\-=\*=\^=\**\/=\%="
            sLine := sToken + sLine
            EXIT
         ELSE
@@ -5180,7 +5519,7 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
            LOOP
         ELSEIF sNext1 == '[' // No need to check prefix because NextToken() already has the logic.
            LOOP
-        ELSEIF sNext1 $ "+-*/:=^!><!$%#|" // *** Very ODD Clipper consider '|' a continuation token !!!
+        ELSEIF sNext1 $ "+-*/:=^!><!$%#|." // *** Very ODD Clipper consider '|' and '.' a continuation token !!!
            sExp           += sNextToken
            sLine          := sNextLine
            #ifdef USE_C_BOOST
@@ -5346,6 +5685,7 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
   LOCAL xValue, nRepeats := 0, nDependee, nGroupStart, sDumb, aBackUp := aClone( aMarkers )
   LOCAL nMarkers, anMarkers, bBuildList
   LOCAL nGroupIterator
+  LOCAL lMacro, lComplexMacro
 
   IF aResults[1] == NIL
      nResults := 0
@@ -5464,12 +5804,12 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
                  FOR nMarker := 1 TO nMarkers
                     // Clipper does not remove optional nested repeatable which only has single value if main repeatable has more values.
                     IF ValType( aMarkers[ anMarkers[nMarker] ] ) == 'A' .AND. ( Len( aBackup[ anMarkers[1] ] ) = 1 .OR. Len( aMarkers[ anMarkers[nMarker] ] ) > 1 )
-                       aDel( aMarkers[ anMarkers[nMarker] ], 1 )
-                       aSize( aMarkers[ anMarkers[nMarker] ], nRepeats )
                        IF bDbgPPO
-                          ? nMarker, "Removed Repeatable"
+                          ? nMarker, "- Removing Repeatable", aMarkers[ anMarkers[nMarker] ][1]
                           WAIT
                        ENDIF
+                       aDel( aMarkers[ anMarkers[nMarker] ], 1 )
+                       aSize( aMarkers[ anMarkers[nMarker] ], nRepeats )
                     ELSE
                        IF bDbgPPO
                           ? nMarker, Len( aBackup[ anMarkers[1] ] ), Len( aMarkers[ anMarkers[nMarker] ] ),"Removed Repeatable"
@@ -5499,12 +5839,12 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
            FOR nMarker := 1 TO nMarkers
               // Clipper does not remove optional nested repeatable which only has single value if main repeatable has more values.
               IF ValType( aMarkers[ anMarkers[nMarker] ] ) == 'A' .AND. Len( aMarkers[ anMarkers[nMarker] ] ) > 1
-                 aDel( aMarkers[ anMarkers[nMarker] ], 1 )
-                 aSize( aMarkers[ anMarkers[nMarker] ], nRepeats )
                  IF bDbgPPO
-                    ? nMarker, "Removed Repeatable"
+                    ? nMarker, "+ Removing Repeatable", ValToPrg( aMarkers[ anMarkers[nMarker] ][1] )
                     WAIT
                  ENDIF
+                 aDel( aMarkers[ anMarkers[nMarker] ], 1 )
+                 aSize( aMarkers[ anMarkers[nMarker] ], nRepeats )
               ELSE
                  IF bDbgPPO
                     ? nMarker, "Removed Repeatable skipped"
@@ -5607,6 +5947,18 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
               nMatches := Len( xValue )
               FOR nMatch := 1 TO nMatches
                  IF Left( xValue[nMatch], 1 ) == '&'
+                    lMacro := .T.
+
+                    IF SubStr( xValue[nMatch], 2, 1 ) != '(' .AND. '.' $ SubStr( xValue[nMatch], 2, Len( xValue[nMatch] ) - 2 )
+                       lComplexMacro := .T.
+                    ELSE
+                       lComplexMacro := .F.
+                    ENDIF
+                 ELSE
+                    lMacro := .F.
+                 ENDIF
+
+                 IF lMacro .AND. ! lComplexMacro
                     IF Right( xValue[nMatch], 1 ) == '.'
                        sResult += SubStr( xValue[nMatch], 2, Len( xValue[nMatch] ) - 2 )
                     ELSE
@@ -5629,6 +5981,18 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
            ELSE
               IF ! ( xValue == NIL )
                  IF Left( xValue, 1 ) == '&'
+                    lMacro := .T.
+
+                    IF SubStr( xValue, 2, 1 ) != '(' .AND. '.' $ SubStr( xValue, 2, Len( xValue ) - 2 )
+                       lComplexMacro := .T.
+                    ELSE
+                       lComplexMacro := .F.
+                    ENDIF
+                 ELSE
+                    lMacro := .F.
+                 ENDIF
+
+                 IF lMacro .AND. ! lComplexMacro
                     IF Right( xValue, 1 ) == '.'
                        sResult += SubStr( xValue, 2, Len( xValue ) - 2 )
                     ELSE
@@ -5655,6 +6019,18 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
                     sResult += xValue[nMatch]
                  ELSE
                     IF Left( xValue[nMatch], 1 ) == '&'
+                       lMacro := .T.
+
+                       IF SubStr( xValue[nMatch], 2, 1 ) != '(' .AND. '.' $ SubStr( xValue[nMatch], 2, Len( xValue[nMatch] ) - 2 )
+                          lComplexMacro := .T.
+                       ELSE
+                          lComplexMacro := .F.
+                       ENDIF
+                    ELSE
+                       lMacro := .F.
+                    ENDIF
+
+                    IF lMacro .AND. ! lComplexMacro
                        IF Right( xValue[nMatch], 1 ) == '.'
                           sResult += SubStr( xValue[nMatch], 2, Len( xValue[nMatch] ) - 2 )
                        ELSE
@@ -5675,6 +6051,18 @@ STATIC FUNCTION PPOut( aResults, aMarkers )
                     sResult += xValue
                  ELSE
                     IF Left( xValue, 1 ) == '&'
+                       lMacro := .T.
+
+                       IF SubStr( xValue, 2, 1 ) != '(' .AND. '.' $ SubStr( xValue, 2, Len( xValue ) - 2 )
+                          lComplexMacro := .T.
+                       ELSE
+                          lComplexMacro := .F.
+                       ENDIF
+                    ELSE
+                       lMacro := .F.
+                    ENDIF
+
+                    IF lMacro .AND. ! lComplexMacro
                        IF Right( xValue, 1 ) == '.'
                           sResult += SubStr( xValue, 2, Len( xValue ) - 2 )
                        ELSE
@@ -5781,6 +6169,10 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
    LOCAL sRuleCopy := sRule
    LOCAL nLastOptional, nPending
    LOCAL sDots
+   LOCAL nMarkerID
+   LOCAL nTempMP
+   LOCAL nTokenLen
+
    /*
    nMarkerID
    nOPTIONAL
@@ -5791,8 +6183,6 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
    */
 
    //? "=>" + sRule + "<="
-
-   //TraceLog( sRule )
 
    ExtractLeadingWS( @sRule )
 
@@ -5811,15 +6201,29 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
    aRule := { sKey, {}, bX }
 
-   nNext := At( "=>", sRule )
+   #ifdef __XHARBOUR__
+      HB_AtX( "(^|[^\\])= *>", sRule, , @nNext, @nTokenLen )
+   #else
+      nNext := 0
+      DO WHILE ( nNext := nAtSkipStr( "=>", sRule, nNext + 1 ) ) > 0
+         IF ! SubStr( sRule, nNext - 1, 1 ) == '\'
+            EXIT
+         ENDIF
+      ENDDO
+
+      nTokenLen := 2
+   #endif
+
    IF nNext == 0
       Alert( [ERROR! Invalid translation format: ] + sRule )
       RETURN .F.
    ELSE
-      sResult := SubStr( sRule, nNext + 2 )
+      sResult := SubStr( sRule, nNext + nTokenLen )
       ExtractLeadingWS( @sResult )
       sRule   := Left( sRule, nNext - 1 )
    ENDIF
+
+   //TraceLog( sRule, sResult )
 
    DO WHILE ! ( Left( sRule, 1 ) == '' )
       //? "Scaning: " + sRule
@@ -5859,7 +6263,7 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
          ENDIF
 
          IF nLen >= 2
-            IF s2 $ "++\--\->\:=\==\!=\<>\>=\<=\+=\-=\*=\^=\**\/=\%=\??"
+            IF s2 $ "++\--\->\:=\==\!=\<>\>=\<=\+=\-=\*=\^=\**\/=\%="
                sTemp := s2
                BREAK
             ENDIF
@@ -5868,7 +6272,7 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
          IF nLen >= 1
             IF s1 == '\'
                sTemp := SubStr( sRule, 2, 1 )
-               sRule   := SubStr( sRule, 2 )
+               sRule := SubStr( sRule, 2 )
                BREAK
             ELSEIF s1 == '_' .OR. IsAlpha( s1 )
                sTemp := Upper( RTrim( NextToken( sRule ) ) ) // Not by refernce because of SubStr() below!!!
@@ -5889,6 +6293,8 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
          ENDIF
 
       END SEQUENCE
+
+      //TraceLog( sTemp )
 
       IF sTemp != NIL
          IF ! ( sAnchor == NIL )
@@ -5913,7 +6319,8 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
       ENDIF
 
       IF s1 == '<'
-         nId++
+         //nId++
+         nId := Len( aMarkers ) + 1
 
          /* Skip trailing spaces...*/
          sRule := SubStr( sRule, 2 )
@@ -5927,9 +6334,18 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                ExtractLeadingWS( @sRule )
 
                nNext := At( '*', sRule )
+
                IF nNext > 1
-                  sMarker := Left( sRule, nNext - 1 )
-                  aAdd( aMarkers, RTrim( sMarker ) )
+                  sMarker := RTrim( Left( sRule, nNext - 1 ) )
+                #ifdef __XHARBOUR__
+                  IF ( nMarkerID := aScan( aMarkers, sMarker, , , .T. ) ) > 0
+                #else
+                  IF ( nMarkerID := aScan( aMarkers, {|s| s == sMarker } ) ) > 0
+                #endif
+                     nId := nMarkerID
+                  ELSE
+                     aAdd( aMarkers, sMarker )
+                  ENDIF
 
                   sRule := SubStr( sRule, nNext + 1 )
                   ExtractLeadingWS( @sRule )
@@ -5965,8 +6381,17 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
                nNext := At( ')', sRule )
                IF nNext > 1
-                  sMarker := Left( sRule, nNext - 1 )
-                  aAdd( aMarkers, RTrim( sMarker ) )
+                  sMarker := RTrim( Left( sRule, nNext - 1 ) )
+
+                #ifdef __XHARBOUR__
+                  IF ( nMarkerID := aScan( aMarkers, sMarker, , , .T. ) ) > 0
+                #else
+                  IF ( nMarkerID := aScan( aMarkers, {|s| s == sMarker } ) ) > 0
+                #endif
+                     nId := nMarkerID
+                  ELSE
+                     aAdd( aMarkers, sMarker )
+                  ENDIF
 
                   sRule := SubStr( sRule, nNext + 1 )
                   ExtractLeadingWS( @sRule )
@@ -6002,8 +6427,17 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
                nNext := At( '!', sRule )
                IF nNext > 1
-                  sMarker := Left( sRule, nNext - 1 )
-                  aAdd( aMarkers, RTrim( sMarker ) )
+                  sMarker := RTrim( Left( sRule, nNext - 1 ) )
+
+                #ifdef __XHARBOUR__
+                  IF ( nMarkerID := aScan( aMarkers, sMarker, , , .T. ) ) > 0
+                #else
+                  IF ( nMarkerID := aScan( aMarkers, {|s| s == sMarker } ) ) > 0
+                #endif
+                     nId := nMarkerID
+                  ELSE
+                     aAdd( aMarkers, sMarker )
+                  ENDIF
 
                   sRule := SubStr( sRule, nNext + 1 )
                   ExtractLeadingWS( @sRule )
@@ -6064,9 +6498,19 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
             //? "Extended: '" + sRule + "'"
             cType := 'A'
 
-            sMarker := Left( sRule, nNext - 1 )
+            sMarker := RTrim( Left( sRule, nNext - 1 ) )
             ExtractLeadingWS( @sMarker )
-            aAdd( aMarkers, sMarker )
+
+          #ifdef __XHARBOUR__
+            IF ( nMarkerID := aScan( aMarkers, sMarker, , , .T. ) ) > 0
+          #else
+            IF ( nMarkerID := aScan( aMarkers, {|s| s == sMarker } ) ) > 0
+          #endif
+               nId := nMarkerID
+            ELSE
+               aAdd( aMarkers, sMarker )
+            ENDIF
+
             sRule := sDots
 
             nNext    := 0
@@ -6079,9 +6523,18 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
             cType := ':'
 
             //? "LIST"
-            sMarker := Left( sRule, nNext - 1 )
+            sMarker := RTrim( Left( sRule, nNext - 1 ) )
             ExtractLeadingWS( @sMarker )
-            aAdd( aMarkers, sMarker )
+
+          #ifdef __XHARBOUR__
+            IF ( nMarkerID := aScan( aMarkers, sMarker, , , .T. ) ) > 0
+          #else
+            IF ( nMarkerID := aScan( aMarkers, {|s| s == sMarker } ) ) > 0
+          #endif
+               nId := nMarkerID
+            ELSE
+               aAdd( aMarkers, sMarker )
+            ENDIF
 
             sRule := SubStr( sRule, nNext + 1 )
             ExtractLeadingWS( @sRule )
@@ -6115,9 +6568,18 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
             ENDIF
 
             IF Len( aMarkers ) < nId
-               sMarker := Left( sRule, nCloseAt - 1 )
+               sMarker := RTrim( Left( sRule, nCloseAt - 1 ) )
                ExtractLeadingWS( @sMarker )
-               aAdd( aMarkers, sMarker )
+
+             #ifdef __XHARBOUR__
+               IF ( nMarkerID := aScan( aMarkers, sMarker, , , .T. ) ) > 0
+             #else
+               IF ( nMarkerID := aScan( aMarkers, {|s| s == sMarker } ) ) > 0
+             #endif
+                  nId := nMarkerID
+               ELSE
+                  aAdd( aMarkers, sMarker )
+               ENDIF
             ENDIF
 
             sRule := SubStr( sRule, nCloseAt + 1 )
@@ -6267,54 +6729,63 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
    DO WHILE ! ( sResult == '' )
       nOffset := 0
-      nOptionalAt := At( '[', sResult )
-      WHILE nOPtionalAt > 1 .AND. SubStr( sResult, nOffset + nOptionalAt - 1, 1 ) == '\'
-         nOffset += nOptionalAt
-         nOptionalAt := At( '[', SubStr( sResult, nOffset + 1 ) )
+      nOptionalAt := nAtSkipStr( '[', sResult )
+      WHILE nOPtionalAt > 1 .AND. SubStr( sResult, nOptionalAt - 1, 1 ) == '\'
+         nOffset := nOptionalAt
+         nOptionalAt := nAtSkipStr( '[', sResult, nOffset + 1 )
       ENDDO
-      IF nOptionalAt > 0
-         nOptionalAt += nOffset
-      ENDIF
 
       nOffset := 0
       IF nOptionalAt == 0
-         nMarkerAt := At( '<', sResult )
+         nMarkerAt := nAtSkipStr( '<', sResult )
          WHILE nMarkerAt > 0
-            IF nMarkerAt > 1 .AND. SubStr( sResult, nOffset + nMarkerAt - 1, 1 ) == '\'
-               nOffset   += nMarkerAt
-               nMarkerAt := At( '<', SubStr( sResult, nOffset + 1 ) )
-            ELSEIF nMarkerAt > 0 .AND. SubStr( sResult, nOffset + nMarkerAt + 1, 1 ) $ ">=" // ignore <= and <>
-               nOffset   += nMarkerAt + 1
-               nMarkerAt := At( '<', SubStr( sResult, nOffset + 1 ) )
+            IF nMarkerAt > 1 .AND. SubStr( sResult, nMarkerAt - 1, 1 ) == '\'
+               nOffset   := nMarkerAt
+               nMarkerAt := nAtSkipStr( '<', sResult, nOffset + 1 )
+               //TraceLog( sResult, nOffset, nMarkerAt )
+            ELSEIF nMarkerAt > 0 .AND. SubStr( sResult, nMarkerAt + 1, 1 ) $ ">=" // ignore <= and <>
+               nOffset   := nMarkerAt + 1
+               nMarkerAt := nAtSkipStr( '<', sResult, nOffset + 1 )
             ELSE
                EXIT
             ENDIF
          ENDDO
-         IF nMarkerAt > 0
-            nMarkerAt += nOffset
-         ENDIF
       ELSE
-         nMarkerAt := At( '<', sResult )
+         nMarkerAt := nAtSkipStr( '<', sResult )
          WHILE nMarkerAt > 0
-            IF nMarkerAt > 1 .AND. nOffset + nMarkerAt < nOptionalAt .AND. SubStr( sResult, nOffset + nMarkerAt - 1, 1 ) == '\'
-               nOffset   += nMarkerAt
-               nMarkerAt := At( '<', SubStr( sResult, nOffset + 1 ) )
-            ELSEIF nMarkerAt > 0 .AND. nOffset + nMarkerAt < nOptionalAt .AND. SubStr( sResult, nOffset + nMarkerAt + 1, 1 ) $ ">=" // ignore <= and <>
-               nOffset   += nMarkerAt + 1
-               nMarkerAt := At( '<', SubStr( sResult, nOffset + 1 ) )
+            IF nMarkerAt > 1 .AND. nMarkerAt < nOptionalAt .AND. SubStr( sResult, nMarkerAt - 1, 1 ) == '\'
+               nOffset   := nMarkerAt
+               nMarkerAt := nAtSkipStr( '<', sResult, nOffset + 1 )
+               //TraceLog( sResult, nOffset, nMarkerAt )
+            ELSEIF nMarkerAt > 0 .AND. nMarkerAt < nOptionalAt .AND. SubStr( sResult, nMarkerAt + 1, 1 ) $ ">=" // ignore <= and <>
+               nOffset   := nMarkerAt + 1
+               nMarkerAt := nAtSkipStr( '<', sResult, nOffset + 1 )
             ELSE
                EXIT
             ENDIF
          ENDDO
-         IF nMarkerAt > 0
-            nMarkerAt += nOffset
-         ENDIF
 
          IF nMarkerAt > 0
             IF nMarkerAt > nOptionalAt
                nMarkerAt := 0
             ELSE
                nOptionalAt := 0
+            ENDIF
+         ELSE
+            TraceLog( "Warning, no markers in repeatable group: " + SubStr( sResult, nOptionalAt ) )
+
+            nCloseOptionalAt := nAtSkipStr( ']', sResult, nOptionalAt )
+            WHILE nCloseOptionalAt > 1 .AND. SubStr( sResult, nCloseOptionalAt - 1, 1 ) == '\'
+               nCloseOptionalAt := nAtSkipStr( ']', sResult, nCloseOptionalAt + 1 )
+            ENDDO
+
+            IF nCloseOptionalAt > 0
+               TraceLog( "Skipped: " + SubStr( sResult, nOptionalAt, nCloseOptionalAt - nOptionalAt + 1 ) )
+               sResult := Left( sResult, nOptionalAt - 1 ) + SubStr( sResult, nCloseOptionalAt + 1 )
+               LOOP
+            ELSE
+               Alert( [ERROR! Unclosed repeatable group.;] + SubStr( sResult, nOptionalAt ) )
+               BREAK
             ENDIF
          ENDIF
       ENDIF
@@ -6326,23 +6797,21 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
       ELSE
          nOffset := 0
          IF nAt == 0
-            nCloseOptionalAt := At( ']', sResult )
-            WHILE nCloseOptionalAt > 1 .AND. SubStr( sResult, nOffset + nCloseOptionalAt - 1, 1 ) == '\'
-               nOffset += nCloseOptionalAt
-               nCloseOptionalAt := At( ']', SubStr( sResult, nOffset + 1 ) )
+            nCloseOptionalAt := nAtSkipStr( ']', sResult )
+            WHILE nCloseOptionalAt > 1 .AND. SubStr( sResult, nCloseOptionalAt - 1, 1 ) == '\'
+               nCloseOptionalAt := nAtSkipStr( ']', sResult, nCloseOptionalAt + 1 )
             ENDDO
-            IF nCloseOptionalAt > 0
-               nCloseOptionalAt += nOffset
+
+            IF nCloseOptionalAt == 0
+               TraceLog( "RP Scan:", nAt, nMarkerAt, nOptionalAt, nCloseOptionalAt, sResult )
+               Alert( [ERROR! Unclosed repeatable group.;] + SubStr( sResult, nOptionalAt ) )
+               BREAK
             ENDIF
          ELSE
-            nCloseOptionalAt := At( ']', sResult )
-            WHILE nCloseOptionalAt > 1 .AND. nOffset + nCloseOptionalAt <= nAt .AND. SubStr( sResult, nOffset + nCloseOptionalAt - 1, 1 ) == '\'
-               nOffset += nCloseOptionalAt
-               nCloseOptionalAt := At( ']', SubStr( sResult, nOffset + 1 ) )
+            nCloseOptionalAt := nAtSkipStr( ']', sResult )
+            WHILE nCloseOptionalAt > 1 .AND. nCloseOptionalAt <= nAt .AND. SubStr( sResult, nCloseOptionalAt - 1, 1 ) == '\'
+               nCloseOptionalAt := nAtSkipStr( ']', sResult, nCloseOptionalAt + 1 )
             ENDDO
-            IF nCloseOptionalAt > 0
-               nCloseOptionalAt += nOffset
-            ENDIF
 
             IF nCloseOptionalAt > 0
                IF nCloseOptionalAt > nAt
@@ -6352,6 +6821,10 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                   nOptionalAt := 0
                   nMarkerAt   := 0
                ENDIF
+            ELSE
+               TraceLog( "RP Scan:", nAt, nMarkerAt, nOptionalAt, nCloseOptionalAt, sResult )
+               Alert( [ERROR! Unclosed repeatable group.;] + SubStr( sResult, nOptionalAt ) )
+               BREAK
             ENDIF
          ENDIF
       ENDIF
@@ -6454,7 +6927,13 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                IF Right( sTemp, 1 ) == '-'
                   nType := 0
                   sTemp := RTrim( Left( sTemp, Len( sTemp ) - 1 ) )
-                  nId := aScan( aMarkers, sTemp )
+
+                #ifdef __XHARBOUR__
+                  nId := aScan( aMarkers, sTemp, , , .T. )
+                #else
+                  nId := aScan( aMarkers, {|s| s == sTemp } )
+                #endif
+
                   sResult := SubStr( sResult, nNext + 1 )
                   ExtractLeadingWS( @sResult, @sPad )
                   IF nId == 0
@@ -6476,7 +6955,13 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
             ELSE
                /*nType := 2*/
                sTemp := RTrim( Left( sResult, nNext - 1 ) )
-               nId := aScan( aMarkers, sTemp )
+
+             #ifdef __XHARBOUR__
+               nId := aScan( aMarkers, sTemp, , , .T. )
+             #else
+               nId := aScan( aMarkers, {|s| s == sTemp } )
+             #endif
+
                sResult := SubStr( sResult, nNext + 1 )
                ExtractLeadingWS( @sResult, @sPad )
                IF nId == 0
@@ -6502,7 +6987,13 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                IF Right( sTemp, 1 ) == '"'
                   nType := 3
                   sTemp := RTrim( Left( sTemp, Len( sTemp ) - 1 ) )
-                  nId := aScan( aMarkers, sTemp )
+
+                #ifdef __XHARBOUR__
+                  nId := aScan( aMarkers, sTemp, , , .T. )
+                #else
+                  nId := aScan( aMarkers, {|s| s == sTemp } )
+                #endif
+
                   sResult := SubStr( sResult, nNext + 1 )
                   ExtractLeadingWS( @sResult, @sPad )
                   IF nId == 0
@@ -6529,7 +7020,13 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                IF Right( sTemp, 1 ) == ')'
                   nType := 4
                   sTemp := RTrim( Left( sTemp, Len( sTemp ) - 1 ) )
-                  nId := aScan( aMarkers, sTemp )
+
+                #ifdef __XHARBOUR__
+                  nId := aScan( aMarkers, sTemp, , , .T. )
+                #else
+                  nId := aScan( aMarkers, {|s| s == sTemp } )
+                #endif
+
                   sResult := SubStr( sResult, nNext + 1 )
                   ExtractLeadingWS( @sResult, @sPad )
                   IF nId == 0
@@ -6556,7 +7053,13 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                IF Right( sTemp, 1 ) == '}'
                   nType := 5
                   sTemp := RTrim( Left( sTemp, Len( sTemp ) - 1 ) )
-                  nId := aScan( aMarkers, sTemp )
+
+                #ifdef __XHARBOUR__
+                  nId := aScan( aMarkers, sTemp, , , .T. )
+                #else
+                  nId := aScan( aMarkers, {|s| s == sTemp } )
+                #endif
+
                   sResult := SubStr( sResult, nNext + 1 )
                   ExtractLeadingWS( @sResult, @sPad )
                   IF nId == 0
@@ -6577,13 +7080,19 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
             nNext := At( ">", sResult )
             IF nNext == 0
-               Alert( [ERROR! Unbalanced RP: '<.' : '] + sTemp + "'" )
+               Alert( [ERROR! Unbalanced RP: '<.' : '] + sResult + "'" )
             ELSE
                sTemp := RTrim( Left( sResult, nNext - 1 ) )
                IF Right( sTemp, 1 ) == '.'
                   nType := 6
                   sTemp := RTrim( Left( sTemp, Len( sTemp ) - 1 ) )
-                  nId := aScan( aMarkers, sTemp )
+
+                #ifdef __XHARBOUR__
+                  nId := aScan( aMarkers, sTemp, , , .T. )
+                #else
+                  nId := aScan( aMarkers, {|s| s == sTemp } )
+                #endif
+
                   sResult := SubStr( sResult, nNext + 1 )
                   ExtractLeadingWS( @sResult, @sPad )
                   IF nId == 0
@@ -6600,16 +7109,22 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
             nNext := At( '>', sResult )
             IF nNext == 0
-               Alert( [ERROR! Unbalanced RP: <] )
+               Alert( [ERROR! Unbalanced RP: '<' : '] + sResult + "'" )
             ELSE
                /* <x> Regular */
                nType := 1
                sTemp := Left( sResult, nNext - 1 )
-               nId := aScan( aMarkers, sTemp )
+
+             #ifdef __XHARBOUR__
+               nId := aScan( aMarkers, sTemp, , , .T. )
+             #else
+               nId := aScan( aMarkers, {|s| s == sTemp } )
+             #endif
+
                sResult := SubStr( sResult, nNext + 1 )
                ExtractLeadingWS( @sResult, @sPad )
                IF nId == 0
-                  aEval( aMarkers, {|sMarker| TraceLog( sTemp, sMarker ) } )
+                  aEval( aMarkers, {|sMarker| TraceLog( sResult, sTemp, sMarker ) } )
                   Alert( [ERROR! Unrecognized RP: '<']+" : '" + sTemp + "'" )
                ELSE
                   aRP := { nOptional, nId }
@@ -6659,10 +7174,9 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
          //? "Repeatable: ", nMarker, "Root: ", nOptional
 
          IF ValType( nMarker ) == 'N'
-            nMP := aScan( aRule[2], {|aMP| aMP[1] == nMarker .OR. aMP[1] - 1000 == nMarker } )
-            IF nMP == 0
-               Alert( [ERROR! Internal logic failed! Missing marker # ] + str( nMarker, 2 ) + " [" + Str(ProcLine(),4 ) + ']' )
-            ELSE
+            nTempMP := 0
+            WHILE ( nTempMP := aScan( aRule[2], {|aMP| aMP[1] == nMarker .OR. aMP[1] - 1000 == nMarker }, nTempMP + 1 ) ) > 0
+               nMP := nTempMP
                WHILE aRule[2][nMP][2] < 0
                   IF aRule[2][nMP][1] >= 0
 
@@ -6682,7 +7196,7 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                   aRule[2][nMP][1] += ( 1000 )
                   //? "Flagged:", nMP, "As:", aRule[2][nMP][1]
                ENDIF
-            ENDIF
+            ENDDO
             //WAIT
          ENDIF
       ELSEIF aRP[1] < 0
@@ -6690,7 +7204,9 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
       ENDIF
 
       IF ValType( aRP[2] ) == 'C'
+         aRP[2] := StrTran( aRP[2], '\\', '' )
          aRP[2] := StrTran( aRP[2], '\', '' )
+         aRP[2] := StrTran( aRP[2], '', '\' )
          //? "RP #", Counter, aRP[1], '"' + aRP[2] + '"'
       ELSE
          //? "RP #", Counter, aRP[1], aRP[2]
@@ -6871,15 +7387,17 @@ RETURN nId
 STATIC FUNCTION CompileDefine( sRule )
 
    LOCAL sKey, sResult, aRule, nCloseAt, nId, sMarker, nCommaAt, aMP
-   LOCAL sToken, aRPs, sAnchor, aMarkers := {}, aResult
+   LOCAL sToken, aRPs, sAnchor, aMarkers := {}, aResult, sPad, sText := ""
 
    ExtractLeadingWS( @sRule )
 
    sKey := NextToken( @sRule )
-   DropTrailingWS( @sKey )
 
-//? "KEY: '" + sKey + "'"
-//? "Rest: '" + sRule + "'"
+   // TraceLog( sKey, sRule )
+   // ? "KEY: '" + sKey + "'"
+   // ? "Rest: '" + sRule + "'"
+
+   DropTrailingWS( @sKey, @sPad )
 
    IF ( nId := aScan( aDefRules, {|aDefine| aDefine[1] == sKey } ) ) > 0
       Alert( [Redefinition of ] + "'" + sKey + "'" + [ in file: ] + s_sFile )
@@ -6897,7 +7415,7 @@ STATIC FUNCTION CompileDefine( sRule )
       aAdd( aDefResults, aResult )
    ENDIF
 
-   IF Left( sRule, 1 ) == '(' .AND. ( nCloseAt := At( ')', sRule ) ) > 0
+   IF sPad == "" .AND. Left( sRule, 1 ) == '(' .AND. ( nCloseAt := At( ')', sRule ) ) > 0
 
       /*Pseudo Function. */
       sResult := SubStr( sRule, nCloseAt + 1 )
@@ -6959,28 +7477,39 @@ STATIC FUNCTION CompileDefine( sRule )
 
             aResult[1] := NIL
             aResult[2] := NIL
-            aResult[3] := NIL
+            aResult[3] := Array( Len( aMarkers ) )
 
          ELSE
 
             WHILE ( sToken := NextToken( @sResult ) ) != NIL
-
-               DropTrailingWS( @sToken )
+               DropTrailingWS( @sToken, @sPad )
 
 //? "Token: '" + sToken + "'"
-
+            #ifdef __XHARBOUR__
+               IF ( nId := aScan( aMarkers, sToken, , , .T. ) ) > 0
+            #else
                IF ( nId := aScan( aMarkers, {|sMarker| sMarker == sToken } ) ) > 0
+            #endif
+                  IF ! ( sText == "" )
+                     aAdd( aRPs, { 0, sText } )
+                     aAdd( aResult[2], -1 )
+                     sText := sPad
+                  ENDIF
+
                   aAdd( aRPs, { 0, nId } )
                   aAdd( aResult[2], 1 )
                ELSE
-                  aAdd( aRPs, { 0, sToken } )
-                  aAdd( aResult[2], -1 )
+                  sText += sToken + sPad
                ENDIF
 
 //? "ID:", nID
 //WAIT
-
             ENDDO
+
+            IF ! ( sText == "" )
+               aAdd( aRPs, { 0, sText } )
+               aAdd( aResult[2], -1 )
+            ENDIF
 
             aResult[1] := aRPs
             aSize( aResult[3], Len( aMarkers ) )
@@ -7412,7 +7941,7 @@ STATIC FUNCTION InitRules()
   aAdd( aCommRules, { 'SET' , { {    1,   0, 'CURSOR', ':', { 'ON', 'OFF', '&' } } } , .F. } )
   aAdd( aCommRules, { 'SET' , { {    0,   0, 'CURSOR', NIL, NIL }, {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
   aAdd( aCommRules, { '?' , { {    1,   1, NIL, 'A', NIL } } , .F. } )
-  aAdd( aCommRules, { '??' , { {    1,   1, NIL, 'A', NIL } } , .F. } )
+  aAdd( aCommRules, { '?' , { {    1,   1, '?', 'A', NIL } } , .F. } )
   aAdd( aCommRules, { 'EJECT' ,  , .F. } )
   aAdd( aCommRules, { 'TEXT' ,  , .F. } )
   aAdd( aCommRules, { 'TEXT' , { {    0,   0, 'TO', NIL, NIL }, {    1,   0, 'FILE', '(', NIL } } , .F. } )
@@ -7890,149 +8419,177 @@ STATIC FUNCTION InitClsRules()
 
  #ifdef __HARBOUR__
 
-   /* Defines */
-   aAdd( aDefRules, { 'HB_CLASS_CH_' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_SETUP_CH_' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_EXTENSION' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_C52_UNDOC' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_COMPAT_C53' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_COMPAT_XPP' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CH_' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_MSGLISTALL' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_MSGLISTCLASS' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_MSGLISTPURE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_EXPORTED' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_PROTECTED' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_HIDDEN' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_CTOR' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_READONLY' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_SHARED' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_CLASS' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSTP_SUPER' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_METHOD' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_DATA' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_CLASSDATA' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_INLINE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_VIRTUAL' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_SUPER' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_ONERROR' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MSG_CLSMTHD' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_DATA_SYMBOL' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_DATA_VALUE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_DATA_TYPE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_DATA_SCOPE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_DATA_PERSISTENT' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSD_SYMBOL' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSD_VALUE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSD_TYPE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSD_SCOPE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MTHD_SYMBOL' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MTHD_PFUNCTION' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MTHD_SCOPE' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_MTHD_PERSISTENT' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSM_SYMBOL' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSM_PFUNCTION' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_OO_CLSM_SCOPE' ,  , .T. } )
-   aAdd( aDefRules, { '__HB_CLS_PAR' ,  , .T. } )
-   aAdd( aDefRules, { '__HB_CLS_NOINI' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_CLS_FWO' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_CLS_CSY' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_CLS_VO' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_CLS_TOP' ,  , .T. } )
-   aAdd( aDefRules, { 'HB_CLS_NO_OO_ERR' ,  , .T. } )
+    /* Defines */
+    aAdd( aDefRules, { 'HB_CLASS_CH_' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_SETUP_CH_' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_EXTENSION' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_C52_UNDOC' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_COMPAT_C53' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_COMPAT_XPP' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_COMPAT_FLAGSHIP' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CH_' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_MSGLISTALL' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_MSGLISTCLASS' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_MSGLISTPURE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_PUBLISHED' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_EXPORTED' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_PROTECTED' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_HIDDEN' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_CTOR' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_READONLY' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_SHARED' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_CLASS' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSTP_SUPER' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_METHOD' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_DATA' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_CLASSDATA' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_INLINE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_VIRTUAL' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_SUPER' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_ONERROR' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_CLSMTHD' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_PROPERTY' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_PROPERTY' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MSG_CLASSPROPERTY' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_DATA_SYMBOL' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_DATA_VALUE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_DATA_TYPE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_DATA_SCOPE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_DATA_PERSISTENT' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSD_SYMBOL' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSD_VALUE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSD_TYPE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSD_SCOPE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MTHD_SYMBOL' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MTHD_PFUNCTION' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MTHD_SCOPE' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_MTHD_PERSISTENT' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSM_SYMBOL' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSM_PFUNCTION' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_OO_CLSM_SCOPE' ,  , .T. } )
+    aAdd( aDefRules, { '__HB_CLS_PAR' ,  , .T. } )
+    aAdd( aDefRules, { '__HB_CLS_NOINI' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_CLS_FWO' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_CLS_CSY' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_CLS_VO' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_CLS_TOP' ,  , .T. } )
+    aAdd( aDefRules, { 'HB_CLS_NO_OO_ERR' ,  , .T. } )
 
-   /* Translates */
-   aAdd( aTransRules, { '__ERR' , { {    0,   0, '(', NIL, NIL }, { 1001,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { ')' , { {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'HBCLSCHOICE' , { {    1,   0, '(', '<', NIL }, {    2,   0, ',', '<', NIL }, {    3,   0, ',', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'CREATE' , { {    0,   0, 'CLASS', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'DECLMETH' , { {    1,   0, NIL, '<', NIL }, {    2,   0, NIL, '<', NIL } } , .T. } )
-   aAdd( aTransRules, { ':' , { {    0,   0, 'CLASS', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { ':' , { {    0,   0, 'CLASS', NIL, NIL }, {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'EXPORTED' , { {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'EXPORT' , { {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'VISIBLE' , { {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'HIDDEN' , { {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'PROTECTED' , { {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'CLASS' , { {    0,   0, 'VAR', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'CLASS' , { {    0,   0, 'METHOD', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { '(' , { {    1,   0, NIL, '!', NIL }, {    0,   0, '{', NIL, NIL }, {    2,   1, NIL, 'A', { '}' } }, {    0,   0, '}', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { '=' , { {    1,   0, NIL, '!', NIL }, {    0,   0, '{', NIL, NIL }, {    2,   1, NIL, 'A', { '}' } }, {    0,   0, '}', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { ',' , { {    1,   0, NIL, '!', NIL }, {    0,   0, '{', NIL, NIL }, {    2,   1, NIL, 'A', { '}' } }, {    0,   0, '}', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { 'END' , { {    0,   0, 'CLASS', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { ':' , { {    0,   0, 'SUPER', NIL, NIL }, {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { ':' , { {    0,   0, 'SUPER', NIL, NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ':', NIL, NIL } } , .T. } )
-   aAdd( aTransRules, { ':' , { {    0,   0, 'SUPER', NIL, NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    /* Translates */
+    aAdd( aTransRules, { '(' , { {    0,   0, '.', NIL, NIL }, {    0,   0, '.', NIL, NIL }, {    0,   0, '.', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
+    aAdd( aTransRules, { '__CLSSETMODULE' , { {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
+    aAdd( aTransRules, { '__ERR' , { {    0,   0, '(', NIL, NIL }, { 1001,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { ')' , { {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'HBCLSCHOICE' , { {    1,   0, '(', 'A', NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'HBCLSCHOICE' , { {    0,   0, '(', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.T.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'HBCLSCHOICE' , { {    0,   0, '(', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.T.', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'HBCLSCHOICE' , { {    0,   0, '(', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.T.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'HBCLSCHOICE' , { {    0,   0, '(', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '.F.', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'CREATE' , { {    0,   0, 'CLASS', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { '_HB_MEMBER' , { {    0,   0, '{', NIL, NIL }, {    0,   0, 'AS', NIL, NIL }, {    0,   0, 'NUM', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { '_HB_MEMBER' , { {    0,   0, '{', NIL, NIL }, {    0,   0, 'AS', NIL, NIL }, {    0,   0, 'CHAR', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'DECLMETH' , { {    1,   0, NIL, '<', NIL }, {    2,   0, NIL, '<', NIL } } , .T. } )
+    aAdd( aTransRules, { ':' , { {    0,   0, 'CLASS', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { ':' , { {    0,   0, 'CLASS', NIL, NIL }, {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'EXPORTED' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'EXPORT' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'VISIBLE' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'PUBLIC' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'HIDDEN' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'PRIVATE' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'PROTECTED' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'PUBLISHED' , { {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'CLASS' , { {    0,   0, 'VAR', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'CLASS' , { {    0,   0, 'METHOD', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { '(' , { {    1,   0, NIL, '!', NIL }, {    0,   0, '{', NIL, NIL }, {    2,   1, NIL, 'A', { '}' } }, {    0,   0, '}', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { '=' , { {    1,   0, NIL, '!', NIL }, {    0,   0, '{', NIL, NIL }, {    2,   1, NIL, 'A', { '}' } }, {    0,   0, '}', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { ',' , { {    1,   0, NIL, '!', NIL }, {    0,   0, '{', NIL, NIL }, {    2,   1, NIL, 'A', { '}' } }, {    0,   0, '}', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { 'END' , { {    0,   0, 'CLASS', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { ':' , { {    0,   0, 'SUPER', NIL, NIL }, {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { ':' , { {    0,   0, 'SUPER', NIL, NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ':', NIL, NIL } } , .T. } )
+    aAdd( aTransRules, { ':' , { {    0,   0, 'SUPER', NIL, NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .T. } )
 
-   /* Commands */
-   aAdd( aCommRules, { 'CLASS' , { {    1,   0, NIL, '<', NIL }, {    2,   1, 'METACLASS', '<', NIL }, { 1003,   1, NIL, ':', { 'FROM', 'INHERIT' } }, { 1004,  -1, NIL, '<', NIL }, { 1005,   2, ',', '<', NIL }, {    6,   1, NIL, ':', { 'STATIC' } } } , .T. } )
-   aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    7,   1, NIL, ':', { 'READONLY', 'RO' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    7,   1, NIL, ':', { 'READONLY', 'RO' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, {    4,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'IS', '<', NIL }, {    3,   0, 'TO', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'DEFERRED', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'EXPORT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'EXPORT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'PROTECT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'PROTECT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'HIDDE' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'HIDDE' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'CLASSVAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    7,   1, NIL, ':', { 'READONLY', 'RO' } }, {    8,   1, NIL, ':', { 'SHARED' } } } , .T. } )
-   aAdd( aCommRules, { 'CLASSVAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    7,   1, NIL, ':', { 'READONLY', 'RO' } }, {    8,   1, NIL, ':', { 'SHARED' } } } , .T. } )
-   aAdd( aCommRules, { 'DATA' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    7,   1, NIL, ':', { 'READONLY', 'RO' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'CLASSDATA' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    7,   1, NIL, ':', { 'READONLY', 'RO' } }, {    8,   1, NIL, ':', { 'SHARED' } } } , .T. } )
-   aAdd( aCommRules, { 'CLASSMETHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    4,   1, NIL, ':', { 'PROTECTED' } }, {    5,   1, NIL, ':', { 'HIDDEN' } }, {    6,   1, NIL, ':', { 'SHARED' } } } , .T. } )
-   aAdd( aCommRules, { 'CONSTRUCTOR' , { {    1,   0, NIL, '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, NIL, ':', { 'CONSTRUCTOR' } }, { 1003,   1, 'AS', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } }, {    0,   1, '_CLASS_DECLARATION_', NIL, NIL }, {    7,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, NIL, ':', { 'CONSTRUCTOR' } }, { 1004,   1, 'AS', '<', NIL }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN' } }, {    0,   1, '_CLASS_DECLARATION_', NIL, NIL }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'BLOCK', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'EXTERN', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'INLINE', 'A', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'INLINE', 'A', NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN' } }, {    9,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1003,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    4,   0, NIL, 'A', NIL }, { 1005,   1, NIL, '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1004,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    5,   0, NIL, 'A', NIL }, { 1006,   1, NIL, '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'VIRTUAL', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'OPERATOR', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN' } } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'OPERATOR', '<', NIL }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN' } } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'METHOD', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN' } } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'METHOD', '<', NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN' } } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'METHOD', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1004,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN' } } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'METHOD', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1005,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1006,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    7,   1, NIL, ':', { 'EXPORTED', 'VISIBLE' } }, {    8,   1, NIL, ':', { 'PROTECTED' } }, {    9,   1, NIL, ':', { 'HIDDEN' } } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, {    4,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1004,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, {    5,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'IS', '<', NIL }, {    5,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'IS', '<', NIL }, {    0,   0, '(', NIL, NIL }, {    5,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, {    6,   0, 'IN', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, { 1004,   1, NIL, 'A', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'TO', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'TO', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'DELEGATE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'TO', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'DELEGATE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'TO', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, {    0,   0, 'SETGET', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, {    0,   0, 'SETGET', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1003,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    4,   0, NIL, 'A', NIL }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
-   aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'DEFERRED', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1004,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    5,   0, NIL, 'A', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ON' , { {    1,   0, 'ERROR', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ERROR' , { {    1,   0, 'HANDLER', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ERROR' , { {    1,   0, 'HANDLER', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'ENDCLASS' ,  , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'DECLCLASS', '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
-   aAdd( aCommRules, { 'DECLARED' , { {    1,   0, 'METHOD', '<', NIL }, {    2,   0, NIL, '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
-   aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
+    /* Commands */
+    aAdd( aCommRules, { 'CLASS' , { {    1,   0, NIL, '<', NIL }, {    2,   1, 'METACLASS', '<', NIL }, { 1003,   1, NIL, ':', { 'FROM', 'INHERIT' } }, { 1004,  -1, NIL, '<', NIL }, { 1005,   2, ',', '<', NIL }, {    6,   1, NIL, ':', { 'STATIC' } } } , .T. } )
+    aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'PUBLISHED' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'READONLY', 'RO' } }, {    9,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'PUBLISHED' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'READONLY', 'RO' } }, {    9,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, {    4,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'VAR' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'IS', '<', NIL }, {    3,   0, 'TO', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'DEFERRED', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'EXPORT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'EXPORT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'PROTECT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'PROTECT' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'HIDDE' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'HIDDE' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'READONLY', 'RO' } }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'CLASSVAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'TYPE', '<', NIL }, {    3,   1, 'ASSIGN', '<', NIL }, {    4,   1, NIL, ':', { 'PUBLISHED' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'READONLY', 'RO' } }, {    9,   1, NIL, ':', { 'SHARED' } } } , .T. } )
+    aAdd( aCommRules, { 'CLASSVAR' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'PUBLISHED' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'READONLY', 'RO' } }, {    9,   1, NIL, ':', { 'SHARED' } } } , .T. } )
+    aAdd( aCommRules, { 'DATA' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'PUBLISHED' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'READONLY', 'RO' } }, {    9,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'CLASSDATA' , { {    1,   0, NIL, 'A', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, 'INIT', '<', NIL }, {    4,   1, NIL, ':', { 'PUBLISHED' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'READONLY', 'RO' } }, { 1009,   1, NIL, ':', { 'SHARED' } } } , .T. } )
+    aAdd( aCommRules, { 'CLASSMETHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    4,   1, NIL, ':', { 'PROTECTED' } }, {    5,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    6,   1, NIL, ':', { 'SHARED' } } } , .T. } )
+    aAdd( aCommRules, { 'CONSTRUCTOR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, NIL, '*', NIL } } , .T. } )
+    aAdd( aCommRules, { 'CONSTRUCTOR' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'INLINE', 'A', NIL }, { 1003,   1, NIL, '*', NIL } } , .T. } )
+    aAdd( aCommRules, { 'DESTRUCTOR' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, NIL, '*', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, NIL, ':', { 'CONSTRUCTOR' } }, { 1003,   1, 'AS', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    0,   1, '_CLASS_DECLARATION_', NIL, NIL }, {    7,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, { 1008,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, NIL, ':', { 'CONSTRUCTOR' } }, { 1004,   1, 'AS', '<', NIL }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    0,   1, '_CLASS_DECLARATION_', NIL, NIL }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, { 1009,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'BLOCK', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, { 1009,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'EXTERN', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, { 1009,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'INLINE', 'A', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    8,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, { 1009,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'INLINE', 'A', NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, {    9,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, { 1010,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1003,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    4,   0, NIL, 'A', NIL }, { 1005,   1, NIL, '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1004,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    5,   0, NIL, 'A', NIL }, { 1006,   1, NIL, '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, { 1003,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    0,   0, 'VIRTUAL', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, { 1003,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    0,   0, 'DYNAMIC', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'OPERATOR', '<', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, { 1007,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'OPERATOR', '<', NIL }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } }, { 1008,   1, NIL, ':', { 'OVERRIDE' } } } , .T. } )
+    aAdd( aCommRules, { 'OPERATOR' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'ARG', '<', NIL }, {    3,   0, 'INLINE', 'A', NIL }, {    4,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    5,   1, NIL, ':', { 'PROTECTED' } }, {    6,   1, NIL, ':', { 'HIDDEN', 'PRIVARE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'METHOD', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'METHOD', '<', NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'METHOD', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1004,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'METHOD', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1005,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1006,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    7,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    8,   1, NIL, ':', { 'PROTECTED' } }, {    9,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'PROCEDURE', '<', NIL }, { 1004,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    5,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    6,   1, NIL, ':', { 'PROTECTED' } }, {    7,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'PROCEDURE', '<', NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'PROCEDURE', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1004,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1005,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    6,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    7,   1, NIL, ':', { 'PROTECTED' } }, {    8,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'PROCEDURE', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1005,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1006,   1, NIL, ':', { 'CONSTRUCTOR' } }, {    7,   1, NIL, ':', { 'EXPORTED', 'VISIBLE', 'PUBLIC' } }, {    8,   1, NIL, ':', { 'PROTECTED' } }, {    9,   1, NIL, ':', { 'HIDDEN', 'PRIVATE' } } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, {    4,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1004,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, {    5,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'IS', '<', NIL }, {    5,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'IS', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1005,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, {    6,   0, 'IN', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'IS', '<', NIL }, { 1004,   1, NIL, 'A', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'TO', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'MESSAGE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'TO', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'DELEGATE' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   0, 'TO', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'DELEGATE' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   0, 'TO', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, {    0,   0, 'SETGET', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } }, {    0,   0, 'SETGET', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    3,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    4,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1003,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    4,   0, NIL, 'A', NIL }, {    5,   1, NIL, ':', { 'PERSISTENT', 'PROPERTY' } } } , .T. } )
+    aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL }, {    0,   0, 'DEFERRED', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, { 1002,   1, 'AS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL }, { 1003,   1, 'AS', '<', NIL }, {    0,   0, 'INLINE', NIL, NIL }, { 1004,   1, 'LOCAL', '<', NIL }, {    0,  -1, ',', NIL, NIL }, {    5,   0, NIL, 'A', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ON' , { {    1,   0, 'ERROR', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ERROR' , { {    1,   0, 'HANDLER', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ERROR' , { {    1,   0, 'HANDLER', '<', NIL }, {    0,   0, '(', NIL, NIL }, { 1002,   1, NIL, 'A', { ')' } }, {    0,   0, ')', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'ENDCLASS' ,  , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'PROCEDURE' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'PROCEDURE' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'METHOD' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'DECLCLASS', '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'PROCEDURE' , { {    0,   1, 'FUNCTION', NIL, NIL }, {    0,   1, 'PROCEDURE', NIL, NIL }, {    1,   0, NIL, '<', NIL }, {    2,   0, 'DECLCLASS', '<', NIL }, {    0,   0, '_CLASS_IMPLEMENTATION_', NIL, NIL } } , .T. } )
+    aAdd( aCommRules, { 'DECLARED' , { {    1,   0, 'METHOD', '<', NIL }, {    2,   0, NIL, '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'DECLARED' , { {    1,   0, 'PROCEDURE', '<', NIL }, {    2,   0, NIL, '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ACCESS' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
+    aAdd( aCommRules, { 'ASSIGN' , { {    1,   0, NIL, '<', NIL }, {    2,   0, 'CLASS', '<', NIL } } , .T. } )
 
  #endif
 
@@ -8044,152 +8601,177 @@ STATIC FUNCTION InitClsResults()
 
  #ifdef __HARBOUR__
 
-   /* Defines Results*/
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { { {   0, '0' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '8' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '16' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '32' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '64' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '128' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '0' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '5' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '6' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '7' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '5' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '__CLS_PARAM' } }, { -1} ,  } )
-   aAdd( aDefResults, { { {   0, '.F.' } }, { -1} ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
-   aAdd( aDefResults, { , ,  } )
+    /* Defines Results*/
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { { {   0, '*/' } }, { -1} ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { { {   0, '0' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '0' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '8' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '16' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '32' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '64' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '128' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '0' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '5' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '6' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '7' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '8' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, 'HB_OO_MSG_DATA      + HB_OO_PROPERTY' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, 'HB_OO_MSG_CLASSDATA + HB_OO_PROPERTY' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '5' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '4' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '1' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '2' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '3' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '__CLS_PARAM' } }, { -1} ,  } )
+    aAdd( aDefResults, { { {   0, '.F.' } }, { -1} ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
+    aAdd( aDefResults, { , ,  } )
 
-   /* Translates Results*/
-   aAdd( aTransResults, { { {   0, '#error ' }, {   1,   1 } }, { -1,  1} , { NIL }  } )
-   aAdd( aTransResults, { { {   0, ')' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'iif( ' }, {   0,   1 }, {   0, ', HB_OO_CLSTP_EXPORTED , iif( ' }, {   0,   2 }, {   0, ', HB_OO_CLSTP_PROTECTED, iif( ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_HIDDEN, nScope) ) )' } }, { -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aTransResults, { { {   0, 'CLASS' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0,   1 }, {   0, '_' }, {   0,   2 } }, {  1, -1,  1} , { NIL, NIL }  } )
-   aAdd( aTransResults, { , ,  } )
-   aAdd( aTransResults, { { {   0, ':' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_HIDDEN' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_PROTECTED' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'CLASSVAR' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, 'CLASSMETHOD' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, '( ' }, {   0,   1 }, {   0, '():New( ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aTransResults, { { {   0, '= ' }, {   0,   1 }, {   0, '():New( ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aTransResults, { { {   0, ', ' }, {   0,   1 }, {   0, '():New( ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aTransResults, { { {   0, 'ENDCLASS' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, ':' }, {   0,   1 }, {   0, ':' } }, { -1,  1, -1} , { NIL }  } )
-   aAdd( aTransResults, { { {   0, ':Super:' } }, { -1} ,  } )
-   aAdd( aTransResults, { { {   0, ':Super' } }, { -1} ,  } )
+    /* Translates Results*/
+    aAdd( aTransResults, { { {   0, '()' } }, { -1} ,  } )
+    aAdd( aTransResults, { , , { NIL }  } )
+    aAdd( aTransResults, { { {   0, '#error ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  1} , { NIL }  } )
+    aAdd( aTransResults, { { {   0, ')' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, ';__ERR( Can not use multiple scope qualifiers! ) #xtranslate HBCLSCHOICE( .T., .F., .F., .F. ) => HB_OO_CLSTP_PUBLISHED' } }, { -1} , { NIL }  } )
+    aAdd( aTransResults, { { {   0, 'HB_OO_CLSTP_PROTECTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'HB_OO_CLSTP_HIDDEN' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'CLASS' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, '_HB_MEMBER {AS Numeric' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, '_HB_MEMBER {AS Character' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, ' ' }, {   0,   1 }, {   0, '_' }, {   0,   2 } }, { -1,  1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aTransResults, { , ,  } )
+    aAdd( aTransResults, { { {   0, ':' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_EXPORTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_HIDDEN' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_HIDDEN' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_PROTECTED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'nScope := HB_OO_CLSTP_PUBLISHED' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'CLASSVAR' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, 'CLASSMETHOD' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, '( ' }, {   0,   1 }, {   0, '():New( ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aTransResults, { { {   0, '= ' }, {   0,   1 }, {   0, '():New( ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aTransResults, { { {   0, ', ' }, {   0,   1 }, {   0, '():New( ' }, {   0,   2 }, {   0, ' )' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aTransResults, { { {   0, 'ENDCLASS' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, ':' }, {   0,   1 }, {   0, ':' } }, { -1,  1, -1} , { NIL }  } )
+    aAdd( aTransResults, { { {   0, ':Super:' } }, { -1} ,  } )
+    aAdd( aTransResults, { { {   0, ':Super' } }, { -1} ,  } )
 
-   /* Commands Results*/
-   aAdd( aCommResults, { { {   0, '_HB_CLASS ' }, {   0,   1 }, {   0, ' ; ' }, {   0,   6 }, {   0, ' function ' }, {   0,   1 }, {   0, '() ; static s_oClass ; local MetaClass,nScope := HB_OO_CLSTP_EXPORTED ; if s_oClass == NIL ; s_oClass := IIF(' }, {   0,   2 }, {   0, ', ' }, {   0,   2 }, {   0, ' ,HBClass():new( ' }, {   0,   1 }, {   0, ' , __HB_CLS_PAR ( ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 }, {   0, ' ) ) ) ; #undef  _CLASS_NAME_ ; #define _CLASS_NAME_ ' }, {   0,   1 }, {   0, ' ; #undef  _CLASS_MODE_ ; #define _CLASS_MODE_ _CLASS_DECLARATION_ ; #xtranslate CLSMETH ' }, ;
-         {   0,   1 }, {   0, ' <MethodName> => @' }, {   0,   1 }, {   0, '_<MethodName> ; #xtranslate DECLCLASS ' }, {   0,   1 }, {   0, ' => ; ' }, {   5, ' ; #translate Super( ' }, {   5,   5 }, {   5, ' ) : => ::' }, {   5,   5 }, {   5, ': ' }, {   0, '' }, {   4, ' ; #translate Super( ' }, {   4,   4 }, {   4, ' ) : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate Super() : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate Super : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate ::Super : => ::' }, {   4,   4 }, {   4, ': ' }, ;
-         {   0, '' }, {   4, ' ; REQUEST ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 } }, { -1,  1, -1,  1, -1,  1, -1,  6, -1,  4, -1,  4, -1,  4, -1, -1,  4, -1,  1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1,  1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   8 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   8 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   3 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   3 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   3 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  4, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 's_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   2 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   2 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1,  4, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_EXPORTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_EXPORTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_PROTECTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_PROTECTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_HIDDEN + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_HIDDEN + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiClsData(' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_SHARED, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiClsData(' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_SHARED, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   8 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiClsData(' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ) + HB_OO_CLSTP_SHARED, {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddClsMthds( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ' ) + iif( ' }, {   0,   6 }, {   0, ', HB_OO_CLSTP_SHARED, 0 ) )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, ' CONSTRUCTOR' } }, { -1,  1, -1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2,   2 }, {   2, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   2 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   7 }, {   0, ' )' } }, { -1,  1, -1,  0, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3,   3 }, {   3, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   4, ' AS ' }, {   4,   4 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  0, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', @' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self | ' }, {   0,   3 }, {   0, ' }, HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, ' | ' }, {   0,   4 }, {   0, ' }, HBCLSCHOICE( ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  0, -1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, ' BLOCK {|Self ' }, {   3, ' ,' }, {   3,   3 }, {   0, ' | ' }, {   0,   4 }, {   0, ' } ' }, {   5,   5 } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  1, -1,  1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, ' BLOCK {|Self ' }, {   2, ' ,' }, {   2,   2 }, {   0, '' }, {   4, ' ,' }, {   4,   4 }, {   0, ' | ' }, {   0,   5 }, {   0, ' } ' }, {   6,   6 } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1, -1,  1, -1,  1, -1,  1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '()  ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) ) ; s_oClass:AddInline( ' }, {   0,   3 }, {   0, ', {|Self [,<params>] | Self:' }, {   0,   1 }, {   0, '( [<params>] ) }, HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) )' } }, { -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ')  ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   2, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) ) ; s_oClass:AddInline( ' }, {   0,   4 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, ' | Self:' }, {   0,   1 }, {   0, '( ' }, {   2,   2 }, {   0, ' ) }, HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) )' } }, ;
-         { -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; #xcommand METHOD ' }, {   0,   3 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   3 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) )' } }, { -1,  1, -1,  0, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   4 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   4 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   4 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) )' } }, { -1,  1, -1,  1, -1,  0, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   4,   4 }, {   0, ') ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; #xcommand METHOD ' }, {   0,   3 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   3 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) )' } }, { -1,  1, -1,  1, -1,  0, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   5,   5 }, {   0, ') ' }, {   2,   2 }, {   0, '' }, {   6,   6 }, {   6, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   4 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   4 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   4 }, {   0, '(), HBCLSCHOICE( ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' ) + iif( ' }, {   0,   6 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) )' } }, { -1,  1, -1,  1, -1,  0, -1,  0, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, '() } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   1 }, {   0, '( ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   3 }, {   0, '() } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   4, ',' }, {   4,   4 }, {   0, '| Self:' }, {   0,   5 }, {   0, ':' }, {   0,   3 }, {   0, '( ' }, {   4,   4 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   5 }, {   0, ':' }, {   0,   4 }, {   0, '( ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   6 }, {   0, ':' }, {   0,   4 }, {   0, '( ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'MESSAGE ' }, {   0,   1 }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, ' METHOD ' }, {   0,   3 }, {   0, '' }, {   4,   4 } }, { -1,  1, -1, -1,  1, -1,  1, -1,  1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   1 }, {   0, '( ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   1 }, {   0, '( ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; _HB_MEMBER _' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   3 }, {   0, ' ) ; s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() )' } }, { -1,  1, -1, -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; _HB_MEMBER _' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY, ' }, {   0,   4 }, {   0, ' ) ; s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   3 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   4 }, {   0, ' )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   3, ',' }, {   3,   3 }, {   0, ' | ' }, {   0,   4 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   5 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER _' }, {   0,   1 }, {   0, '() ' }, {   2, 'AS ' }, {   2,   2 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ _' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED )' } }, { -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER _' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ _' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  4, -1,  1, -1} , { NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER _' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, ') ' }, {   3, 'AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '' }, {   4, ' ,' }, {   4,   4 }, {   0, ' | ' }, {   0,   5 }, {   0, ' }, HB_OO_CLSTP_EXPORTED )' } }, { -1,  1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'ERROR HANDLER ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:SetOnError( CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() )' } }, { -1,  1, -1,  1, -1, -1, -1,  1, -1,  1, -1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2,   2 }, {   0, '); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, ' DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); s_oClass:SetOnError( CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() )' } }, { -1,  1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '; s_oClass:Create() ; endif ; return s_oClass:Instance() AS CLASS _CLASS_NAME_ ; #undef  _CLASS_MODE_ ; #define _CLASS_MODE_ _CLASS_IMPLEMENTATION_' } }, { -1} ,  } )
-   aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '  _CLASS_MODE_' } }, { -1,  1, -1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '  CLASS ' }, {   0,   2 }, {   0, '  _CLASS_MODE_' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '     CLASS ' }, {   0,   2 }, {   0, ' _CLASS_IMPLEMENTATION_' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, 'DECLARED METHOD ' }, {   0,   2 }, {   0, ' ' }, {   0,   1 } }, { -1,  1, -1,  1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, '#error Class ' }, {   0,   2 }, {   0, ' not declared for method: ' }, {   0,   1 }, {   0, ' ; function ' }, {   0,   1 }, {   0, ' ; local self := QSelf()' } }, { -1,  3, -1,  1, -1,  1, -1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'static function DECLMETH ' }, {   0,   1 }, {   0, ' ' }, {   0,   2 }, {   0, ' ; local Self AS CLASS ' }, {   0,   1 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   1 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'static function ' }, {   0,   2 }, {   0, '_' }, {   0,   1 }, {   0, ' ; local Self AS CLASS ' }, {   0,   2 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   2 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'static function ' }, {   0,   2 }, {   0, '__' }, {   0,   1 }, {   0, ' ; local Self AS CLASS ' }, {   0,   2 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   2 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
+    /* Commands Results*/
+    aAdd( aCommResults, { { {   0, '_HB_CLASS ' }, {   0,   1 }, {   0, ' ; ' }, {   4, ' REQUEST ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 }, {   0, ' ; ' }, {   0,   6 }, {   0, ' function ' }, {   0,   1 }, {   0, '(...) ; static s_oClass ; local oClassInstance ; local nScope ; nScope := HB_OO_CLSTP_EXPORTED ; if s_oClass == NIL ; s_oClass  := IIF(' }, {   0,   2 }, {   0, ', ' }, {   0,   2 }, {   0, ', HBClass():new( ' }, {   0,   1 }, {   0, ' , __HB_CLS_PAR ( ' }, {   4, ' ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 }, {   0, ' ) ) ) ; #undef  _CLASS_NAME_ ; #define _CLASS_NAME_ ' }, {   0,   1 }, {   0, ' ; #undef  _CLASS_MODE_ ; #define _CLASS_MODE_ _CLASS_DECLARATION_ ; #xtranslate CLSMETH ' }, {   0,   1 }, {   0, ' <MethodName> => @' }, {   0,   1 }, {   0, '_<MethodName> ; #xtranslate DECLCLASS ' }, {   0,   1 }, {   0, ' => ; ' }, {   5, ' ; #translate Super( ' }, {   5,   5 }, {   5, ' ) : => ::' }, {   5,   5 }, {   5, ': ' }, {   0, '' }, {   4, ' ; #translate Super( ' }, {   4,   4 }, {   4, ' ) : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate Super() : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate Super : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate ::Super : => ::' }, {   4,   4 }, {   4, ': ' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  1, -1,  1, -1,  6, -1,  4, -1,  4, -1, -1,  4, -1, -1,  4, -1,  1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   9 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   9 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   3 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   3 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   3 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  4, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 's_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   2 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY ) ; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self, param| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   2 }, {   0, ' := param }, HB_OO_CLSTP_EXPORTED )' } }, { -1,  4, -1,  1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_EXPORTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_EXPORTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_PROTECTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_PROTECTED + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_HIDDEN + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_HIDDEN + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   5 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiClsData(' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ) + iif( ' }, {   0,   9 }, {   0, ', HB_OO_CLSTP_SHARED, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiClsData(' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ) + iif( ' }, {   0,   9 }, {   0, ', HB_OO_CLSTP_SHARED, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   9 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiClsData(' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   8 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ) + HB_OO_CLSTP_SHARED, {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddClsMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ' ) + iif( ' }, {   0,   6 }, {   0, ', HB_OO_CLSTP_SHARED, 0 ) ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, ' CONSTRUCTOR ' }, {   2, ' ' }, {   2,   2 } }, { -1,  1, -1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, ' INLINE ' }, {   0,   2 }, {   0, ' CONSTRUCTOR ' }, {   3, ' ' }, {   3,   3 } }, { -1,  1, -1,  1, -1, -1,  1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '' }, {   2, ' ' }, {   2,   2 } }, { -1,  1, -1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' ' }, {   2,   2 }, {   2, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   2 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   7 }, {   0, ' ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); #xcommand PROCEDURE ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED PROCEDURE _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' ' }, {   3,   3 }, {   3, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   4, ' AS ' }, {   4,   4 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   3 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>]); #xcommand PROCEDURE ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED PROCEDURE _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4, ' ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4, ' ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', @' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4, ' ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self | ' }, {   0,   3 }, {   0, ' }, HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   8 }, {   0, ' )' } }, { -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   5, ' ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, ' | ' }, {   0,   4 }, {   0, ' }, HBCLSCHOICE( .F., ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ), ' }, {   0,   9 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, ' BLOCK {|Self ' }, {   3, ',' }, {   3,   3 }, {   0, ' | ' }, {   0,   4 }, {   0, ' } ' }, {   5, ' ' }, {   5,   5 } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  1, -1, -1,  1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, ' BLOCK {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '' }, {   4, ',' }, {   4,   4 }, {   0, ' | ' }, {   0,   5 }, {   0, ' } ' }, {   6, ' ' }, {   6,   6 } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1, -1,  1, -1,  1, -1, -1,  1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '()  ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) ) ; s_oClass:AddInline( ' }, {   0,   3 }, {   0, ', {|Self| Self:' }, {   0,   1 }, {   0, '() }, HBCLSCHOICE( .F., ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ')  ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) ) ; s_oClass:AddInline( ' }, {   0,   4 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, ' | Self:' }, {   0,   1 }, {   0, '( ' }, {   2, ' ' }, {   2,   2 }, {   0, ' ) }, HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  4, -1, -1,  1, -1,  1, -1, -1,  1, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 's_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self, ' }, {   0,   2 }, {   0, ' | ' }, {   0,   3 }, {   0, ' }, HBCLSCHOICE( .F., ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) )' } }, { -1,  4, -1,  1, -1,  1, -1,  6, -1,  6, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4, ' ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand METHOD ' }, {   0,   3 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   3 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   5, ' ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   4 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand METHOD ' }, {   0,   4 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   4 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   4, ' ' }, {   4,   4 }, {   0, ') ' }, {   5, ' ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand METHOD ' }, {   0,   3 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   3 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   5, ' ' }, {   5,   5 }, {   0, ') ' }, {   2, ' ' }, {   2,   2 }, {   0, '' }, {   6, ' ' }, {   6,   6 }, {   6, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   4 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' ) + iif( ' }, {   0,   6 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand METHOD ' }, {   0,   4 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   4 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   4, ' ' }, {   4,   4 }, {   4, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ' ) + iif( ' }, {   0,   4 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand PROCEDURE ' }, {   0,   3 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED PROCEDURE _CLASS_NAME_ ' }, {   0,   3 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   5, ' ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   4 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand PROCEDURE ' }, {   0,   4 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED PROCEDURE _CLASS_NAME_ ' }, {   0,   4 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   4, ' ' }, {   4,   4 }, {   0, ') ' }, {   5, ' ' }, {   5,   5 }, {   5, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   3 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   6 }, {   0, ', ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ' ) + iif( ' }, {   0,   5 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand PROCEDURE ' }, {   0,   3 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED PROCEDURE _CLASS_NAME_ ' }, {   0,   3 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   5, ' ' }, {   5,   5 }, {   0, ') ' }, {   2, ' ' }, {   2,   2 }, {   0, '' }, {   6, ' ' }, {   6,   6 }, {   6, ' AS CLASS _CLASS_NAME_' }, {   0, '' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   4 }, {   0, '(), HBCLSCHOICE( .F., ' }, {   0,   7 }, {   0, ', ' }, {   0,   8 }, {   0, ', ' }, {   0,   9 }, {   0, ' ) + iif( ' }, {   0,   6 }, {   0, ', HB_OO_CLSTP_CTOR, 0 ) ); #xcommand PROCEDURE ' }, {   0,   4 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED PROCEDURE _CLASS_NAME_ ' }, {   0,   4 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  0, -1, -1,  0, -1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, '() } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   1 }, {   0, '( ' }, {   2, ' ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   3 }, {   0, '() } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   4, ',' }, {   4,   4 }, {   0, '| Self:' }, {   0,   5 }, {   0, ':' }, {   0,   3 }, {   0, '( ' }, {   4, ' ' }, {   4,   4 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   5 }, {   0, ':' }, {   0,   4 }, {   0, '( ' }, {   2, ' ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   6 }, {   0, ':' }, {   0,   4 }, {   0, '( ' }, {   2, ' ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'MESSAGE ' }, {   0,   1 }, {   0, '' }, {   2, ' AS ' }, {   2,   2 }, {   0, ' METHOD ' }, {   0,   3 }, {   0, '' }, {   4, ' ' }, {   4,   4 } }, { -1,  1, -1, -1,  1, -1,  1, -1, -1,  1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   1 }, {   0, '( ' }, {   2, ' ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self| Self:' }, {   0,   3 }, {   0, ':' }, {   0,   1 }, {   0, ' } )' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '| Self:' }, {   0,   4 }, {   0, ':' }, {   0,   1 }, {   0, '( ' }, {   2, ' ' }, {   2,   2 }, {   0, ' ) } )' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; _HB_MEMBER _' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   3 }, {   0, ' ) ; s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; _HB_MEMBER _' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY, ' }, {   0,   4 }, {   0, ' ) ; s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  4, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   3 }, {   0, ' ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   4 }, {   0, ' ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddInline( ' }, {   0,   1 }, {   0, ', {|Self ' }, {   3, ',' }, {   3,   3 }, {   0, ' | ' }, {   0,   4 }, {   0, ' }, HB_OO_CLSTP_EXPORTED + HB_OO_CLSTP_READONLY , ' }, {   0,   5 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1,  1, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddVirtual( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1, -1,  1, -1,  4, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER _' }, {   0,   1 }, {   0, '() ' }, {   2, ' AS ' }, {   2,   2 }, {   0, '; s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ _' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER _' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddMethod( "_" + ' }, {   0,   1 }, {   0, ', CLSMETH _CLASS_NAME_ _' }, {   0,   1 }, {   0, '(), HB_OO_CLSTP_EXPORTED ); #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER _' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, ') ' }, {   3, ' AS ' }, {   3,   3 }, {   0, '; s_oClass:AddInline( "_" + ' }, {   0,   1 }, {   0, ', {|Self ' }, {   2, ',' }, {   2,   2 }, {   0, '' }, {   4, ',' }, {   4,   4 }, {   0, ' | ' }, {   0,   5 }, {   0, ' }, HB_OO_CLSTP_EXPORTED )' } }, { -1,  1, -1, -1,  1, -1, -1,  1, -1,  4, -1, -1,  1, -1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'ERROR HANDLER ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(); s_oClass:SetOnError( CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() ) ; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL }  } )
+    aAdd( aCommResults, { { {   0, '_HB_MEMBER ' }, {   0,   1 }, {   0, '(' }, {   2, ' ' }, {   2,   2 }, {   0, '); s_oClass:SetOnError( CLSMETH _CLASS_NAME_ ' }, {   0,   1 }, {   0, '() ) ; #xcommand METHOD ' }, {   0,   1 }, {   0, ' [([<anyParams,...>])] ' }, {   0, 'DECLCLASS _CLASS_NAME_' }, {   0, ' _CLASS_IMPLEMENTATION_ => DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 }, {   0, '([<anyParams>])' } }, { -1,  1, -1, -1,  1, -1,  1, -1,  1, -1, -1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '; s_oClass:Create() ; __ClsSetModule( s_oClass:hClass ) ; endif ; oClassInstance := __clsInst( s_oClass:hClass ); IF PCount() > 0 ; s_oClass:ConstructorCall( oClassInstance, hb_aparams() ) ; ENDIF ; return oClassInstance AS CLASS _CLASS_NAME_ ; #undef  _CLASS_MODE_ ; #define _CLASS_MODE_ _CLASS_IMPLEMENTATION_' } }, { -1} ,  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '  _CLASS_MODE_' } }, { -1,  1, -1} , { NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '  CLASS ' }, {   0,   2 }, {   0, '  _CLASS_MODE_' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'METHOD ' }, {   0,   1 }, {   0, '     CLASS ' }, {   0,   2 }, {   0, ' _CLASS_IMPLEMENTATION_' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'DECLARED METHOD _CLASS_NAME_ ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
+    aAdd( aCommResults, { { {   0, 'DECLARED METHOD ' }, {   0,   2 }, {   0, ' ' }, {   0,   1 } }, { -1,  1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'PROCEDURE ' }, {   0,   1 }, {   0, '     CLASS ' }, {   0,   2 }, {   0, ' _CLASS_IMPLEMENTATION_' } }, { -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'DECLARED PROCEDURE ' }, {   0,   2 }, {   0, ' ' }, {   0,   1 } }, { -1,  1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '#error Class ' }, {   0,   2 }, {   0, ' not declared for method: ' }, {   0,   1 }, {   0, ' ; function ' }, {   0,   1 }, {   0, ' ; local self := QSelf()' } }, { -1,  3, -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, '#error Class ' }, {   0,   2 }, {   0, ' not declared for procedure: ' }, {   0,   1 }, {   0, ' ; function ' }, {   0,   1 }, {   0, ' ; local self := QSelf()' } }, { -1,  3, -1,  1, -1,  1, -1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'static function DECLMETH ' }, {   0,   1 }, {   0, ' ' }, {   0,   2 }, {   0, ' ; local Self AS CLASS ' }, {   0,   1 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   1 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'static procedure DECLMETH ' }, {   0,   1 }, {   0, ' ' }, {   0,   2 }, {   0, ' ; local Self AS CLASS ' }, {   0,   1 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   1 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'static function ' }, {   0,   2 }, {   0, '_' }, {   0,   1 }, {   0, ' ; local Self AS CLASS ' }, {   0,   2 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   2 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
+    aAdd( aCommResults, { { {   0, 'static function ' }, {   0,   2 }, {   0, '__' }, {   0,   1 }, {   0, ' ; local Self AS CLASS ' }, {   0,   2 }, {   0, ' := QSelf() AS CLASS ' }, {   0,   2 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL }  } )
 
  #endif
 
@@ -8205,7 +8787,6 @@ INIT PROCEDURE PPInit
    FClose(FileHandle)
 
 RETURN
-#endif
 
 //--------------------------------------------------------------//
 FUNCTION TraceLog(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15 )
@@ -8242,7 +8823,6 @@ FUNCTION TraceLog(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p
 
 RETURN .T.
 
-#ifndef __XHARBOUR__
 //--------------------------------------------------------------//
 FUNCTION CStr( xExp )
 
@@ -8306,7 +8886,7 @@ RETURN s_oSelf
 
 STATIC FUNCTION NextIdentifier( sLine, sSkipped )
 
-   LOCAL nAt, nLen := Len( sLine ), cChar, cLastChar, nStart, sIdentifier, sTmp
+   LOCAL nAt, nLen := Len( sLine ), cChar, cLastChar := '0', nStart, sIdentifier, sTmp
 
    FOR nAt := 1 TO nLen
        cChar := SubStr( sLine, nAt, 1 )
@@ -8377,9 +8957,16 @@ RETURN sIdentifier
 FUNCTION nAtSkipStr( sFind, sLine, nStart )
 
    LOCAL nAt, nLen := Len( sLine ), cChar, cLastChar := ' ', sTmp, nLenFind := Len( sFind )
+   LOCAL lRule
 
    IF nStart == NIL
       nStart := 1
+   ENDIF
+
+   IF ProcName( 1 ) == "COMPILERULE"
+      lRule := .T.
+   ELSE
+      lRule := .F.
    ENDIF
 
    FOR nAt := nStart TO nLen
@@ -8393,7 +8980,7 @@ FUNCTION nAtSkipStr( sFind, sLine, nStart )
           DO WHILE ( nAt < nLen ) .AND. SubStr( sLine, ++nAt, 1 ) != cChar
           ENDDO
           LOOP // No need to record cLastChar
-       ELSEIF cChar == '['
+       ELSEIF lRule == .F. .AND. cChar == '['
           IF ! ( IsAlpha( cLastChar  ) .OR. IsDigit( cLastChar ) .OR. cLastChar $ "])}_." )
              DO WHILE ( nAt < nLen ) .AND. SubStr( sLine, ++nAt, 1 ) != ']'
              ENDDO
@@ -8424,9 +9011,9 @@ RETURN sModule
 STATIC FUNCTION InitRunRules()
 
    /* Defines */
-   aAdd( aDefRules, { 'HB_CLS_NO_OO_ERR' ,  , .T. } )
 
    /* Translates */
+   aAdd( aTransRules, { '.' , { {    0,   0, '.', NIL, NIL }, {    0,   0, '.', NIL, NIL } } , .F. } )
    aAdd( aTransRules, { 'AS' , { {    1,   0, NIL, ':', { 'ANYTYPE', 'ARRAY', 'CHARACTER', 'CODEBLOCK', 'DATE', 'LOGICAL', 'NUMERIC', 'OBJECT', 'STRING', 'USUAL' } } } , .F. } )
    aAdd( aTransRules, { 'AS' , { {    0,   0, 'ARRAY', NIL, NIL }, {    1,   0, 'OF', '<', NIL } } , .F. } )
    aAdd( aTransRules, { 'AS' , { {    1,   0, 'CLASS', '!', NIL } } , .F. } )
@@ -8440,34 +9027,29 @@ STATIC FUNCTION InitRunRules()
    aAdd( aTransRules, { 'PROCLINE' , { {    0,   0, '(', NIL, NIL }, {    1,   1, NIL, '<', { ')' } }, {    0,   0, ')', NIL, NIL } } , .F. } )
 
    /* Commands */
- #ifdef WIN
-   aAdd( aCommRules, { 'ALERT' , { {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
- #endif
-
-   aAdd( aCommRules, { '_HB_CLASS' , { {    1,   0, NIL, '*', NIL } } , .F. } )
-   aAdd( aCommRules, { '_HB_MEMBER' , { {    1,   0, NIL, '*', NIL } } , .F. } )
-   aAdd( aCommRules, { 'MEMVAR' , { {    1,   0, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { '_HB_CLASS' , { {    1,   0, NIL, '<', NIL } } , .F. } )
+   aAdd( aCommRules, { '_HB_MEMBER' , { {    1,   0, NIL, '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'MEMVAR' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'EXTERNAL' , { {    1,   0, NIL, '!', NIL }, { 1002,   1, ',', '<', NIL } } , .F. } )
-   aAdd( aCommRules, { 'DECLARE' , { {    1,   0, NIL, '!', NIL }, {    2,   0, NIL, '<', NIL }, {    3,   0, NIL, '*', NIL } } , .F. } )
    aAdd( aCommRules, { 'DO' , { {    1,   0, NIL, '!', NIL } } , .F. } )
    aAdd( aCommRules, { 'DO' , { {    1,   0, NIL, '!', NIL }, {    2,   0, 'WITH', '<', NIL }, { 1003,   1, ',', '<', NIL } } , .F. } )
    aAdd( aCommRules, { 'IF' , { {    1,   0, NIL, '<', NIL } } , .F. } )
    aAdd( aCommRules, { 'ELSEIF' , { {    1,   0, NIL, '<', NIL } } , .F. } )
    aAdd( aCommRules, { 'ELSE' ,  , .F. } )
-   aAdd( aCommRules, { 'ENDIF' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
-   aAdd( aCommRules, { 'END' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ENDIF' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
+   aAdd( aCommRules, { 'END' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'DO' , { {    0,   0, 'CASE', NIL, NIL } } , .F. } )
    aAdd( aCommRules, { 'CASE' , { {    1,   0, NIL, '<', NIL } } , .F. } )
    aAdd( aCommRules, { 'OTHERWISE' ,  , .F. } )
-   aAdd( aCommRules, { 'ENDCASE' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ENDCASE' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'FOR' , { {    1,   0, NIL, '<', NIL }, {    2,   0, ':=', '<', NIL }, {    3,   0, 'TO', '<', NIL }, {    4,   1, 'STEP', '<', NIL } } , .F. } )
    aAdd( aCommRules, { 'FOR' , { {    1,   0, NIL, '<', NIL }, {    2,   0, '=', '<', NIL }, {    3,   0, 'TO', '<', NIL }, {    4,   1, 'STEP', '<', NIL } } , .F. } )
-   aAdd( aCommRules, { 'LOOP' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
-   aAdd( aCommRules, { 'EXIT' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
-   aAdd( aCommRules, { 'NEXT' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'LOOP' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
+   aAdd( aCommRules, { 'EXIT' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
+   aAdd( aCommRules, { 'NEXT' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'DO' , { {    1,   0, 'WHILE', '<', NIL } } , .F. } )
    aAdd( aCommRules, { 'WHILE' , { {    1,   0, NIL, '<', NIL } } , .F. } )
-   aAdd( aCommRules, { 'ENDDO' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ENDDO' , { { 1001,   1, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'DO' , { {    1,   0, NIL, '(', NIL }, {    0,   0, '.', NIL, NIL }, {    0,   0, 'PRG', NIL, NIL } } , .F. } )
    aAdd( aCommRules, { 'INIT' , { {    1,   0, 'PROCEDURE', '!', NIL }, {    0,   1, '(', NIL, NIL }, {    0,  -1, ')', NIL, NIL } } , .F. } )
    aAdd( aCommRules, { 'EXIT' , { {    1,   0, 'PROCEDURE', '!', NIL }, {    0,   1, '(', NIL, NIL }, {    0,  -1, ')', NIL, NIL } } , .F. } )
@@ -8486,6 +9068,11 @@ STATIC FUNCTION InitRunRules()
    aAdd( aCommRules, { 'PUBLIC' , { {    1,   0, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'LOCAL' , { {    1,   0, NIL, 'A', NIL } } , .F. } )
    aAdd( aCommRules, { 'STATIC' , { {    1,   0, NIL, 'A', NIL } } , .F. } )
+   aAdd( aCommRules, { 'FIELD' , { {    1,   0, NIL, 'A', NIL } } , .F. } )
+
+   IF aScan( aDefRules, {|aDefine| aDefine[1] == "WIN" } ) > 0
+      aAdd( aCommRules, { 'ALERT' , { {    1,   0, '(', '<', NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
+   ENDIF
 
 RETURN .T.
 
@@ -8494,9 +9081,9 @@ RETURN .T.
 STATIC FUNCTION InitRunResults()
 
    /* Defines Results*/
-   aAdd( aDefResults, { { {   0, '1' } }, { -1} , { }  } )
 
    /* Translates Results*/
+   aAdd( aTransResults, { , ,  } )
    aAdd( aTransResults, { , , { NIL }  } )
    aAdd( aTransResults, { , , { NIL }  } )
    aAdd( aTransResults, { , , { NIL }  } )
@@ -8510,34 +9097,29 @@ STATIC FUNCTION InitRunResults()
    aAdd( aTransResults, { { {   0, 'PP_ProcLine( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
 
    /* Commands Results*/
- #ifdef WIN
-   aAdd( aCommResults, { { {   0, 'MessageBox( 0, CStr( ' }, {   0,   1 }, {   0, ' ), "xBaseScript for Windows", 0 )' } }, { -1,  1, -1} , { NIL }  } )
- #endif
-
    aAdd( aCommResults, { , , { NIL }  } )
    aAdd( aCommResults, { , , { NIL }  } )
    aAdd( aCommResults, { , , { NIL }  } )
    aAdd( aCommResults, { , , { NIL, NIL }  } )
-   aAdd( aCommResults, { , , { NIL, NIL, NIL }  } )
    aAdd( aCommResults, { { {   0, ' ' }, {   0,   1 }, {   0, '()' } }, { -1,  1, -1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, ' ' }, {   0,   1 }, {   0, '( ' }, {   0,   2 }, {   0, '' }, {   3, ', ' }, {   3,   3 }, {   0, ' )' } }, { -1,  1, -1,  1, -1, -1,  1, -1} , { NIL, NIL, NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__IF ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__ELSEIF ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__ELSE' } }, { -1} ,  } )
-   aAdd( aCommResults, { { {   0, 'PP__ENDIF' } }, { -1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, 'PP__END' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__ENDIF ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__END ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__DOCASE' } }, { -1} ,  } )
    aAdd( aCommResults, { { {   0, 'PP__CASE ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__OTHERWISE' } }, { -1} ,  } )
-   aAdd( aCommResults, { { {   0, 'PP__ENDCASE' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__ENDCASE ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__FOR ' }, {   0,   1 }, {   0, ':=' }, {   0,   2 }, {   0, '~TO~' }, {   0,   3 }, {   0, '~STEP~' }, {   0,   4 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL, NIL, NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__FOR ' }, {   0,   1 }, {   0, ':=' }, {   0,   2 }, {   0, '~TO~' }, {   0,   3 }, {   0, '~STEP~' }, {   0,   4 } }, { -1,  1, -1,  1, -1,  1, -1,  1} , { NIL, NIL, NIL, NIL }  } )
-   aAdd( aCommResults, { { {   0, 'PP__LOOP' } }, { -1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, 'PP__EXIT' } }, { -1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, 'PP__NEXT' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__LOOP ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__EXIT ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__NEXT ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__WHILE ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP__WHILE ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
-   aAdd( aCommResults, { { {   0, 'PP__ENDDO' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP__ENDDO ' }, {   1, ' ' }, {   1,   1 } }, { -1, -1,  0} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP_Run( ' }, {   0,   1 }, {   0, ' + ".prg" )' } }, { -1,  2, -1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP_PROC_INIT ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP_PROC_EXIT ' }, {   0,   1 } }, { -1,  1} , { NIL }  } )
@@ -8556,6 +9138,67 @@ STATIC FUNCTION InitRunResults()
    aAdd( aCommResults, { { {   0, 'PP_Publics( { ' }, {   0,   1 }, {   0, ' } )' } }, { -1,  3, -1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP_Locals( { ' }, {   0,   1 }, {   0, ' } )' } }, { -1,  3, -1} , { NIL }  } )
    aAdd( aCommResults, { { {   0, 'PP_Statics( { ' }, {   0,   1 }, {   0, ' } )' } }, { -1,  3, -1} , { NIL }  } )
+   aAdd( aCommResults, { , , { NIL }  } )
+
+   IF aScan( aDefRules, {|aDefine| aDefine[1] == "WIN" } ) > 0
+      aAdd( aCommResults, { { {   0, 'MessageBox( 0, CStr( ' }, {   0,   1 }, {   0, ' ), "xBaseScript for Windows", 0 )' } }, { -1,  1, -1} , { NIL }  } )
+   ENDIF
+
+RETURN .T.
+
+//--------------------------------------------------------------//
+STATIC FUNCTION InitDotRules()
+
+   /* Defines */
+
+   /* Translates */
+   aAdd( aTransRules, { '_GET_' , { {    1,   0, '(', '<', NIL }, {    2,   0, ',', '<', NIL }, {    0,   0, ',', NIL, NIL }, {    3,   1, NIL, '<', { ',' } }, {    0,   0, ',', NIL, NIL }, {    4,   1, NIL, '<', { ',' } }, {    0,   0, ',', NIL, NIL }, {    5,   1, NIL, '<', { ')' } }, {    0,   0, ')', NIL, NIL } } , .F. } )
+   aAdd( aTransRules, { '__GET' , { {    1,   0, '(', 'A', NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ':', NIL, NIL }, {    0,   0, 'DISPLAY', NIL, NIL }, {    0,   0, '(', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
+   aAdd( aTransRules, { 'AADD' , { {    0,   0, '(', NIL, NIL }, {    0,   0, 'GETLIST', NIL, NIL }, {    0,   0, ',', NIL, NIL }, {    0,   0, '__GET', NIL, NIL }, {    1,   0, '(', 'A', NIL }, {    0,   0, ')', NIL, NIL }, {    0,   0, ')', NIL, NIL } } , .F. } )
+
+   /* Commands */
+   aAdd( aCommRules, { 'CLS' ,  , .F. } )
+   aAdd( aCommRules, { 'BROWSE' ,  , .F. } )
+   aAdd( aCommRules, { 'EXIT' ,  , .F. } )
+   aAdd( aCommRules, { 'IF' , { {    1,   0, NIL, '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ELSEIF' , { {    1,   0, NIL, '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'ELSE' ,  , .F. } )
+   aAdd( aCommRules, { 'ENDIF' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'END' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DO' , { {    0,   0, 'CASE', NIL, NIL } } , .F. } )
+   aAdd( aCommRules, { 'CASE' , { {    1,   0, NIL, '<', NIL } } , .F. } )
+   aAdd( aCommRules, { 'OTHERWISE' ,  , .F. } )
+   aAdd( aCommRules, { 'ENDCASE' , { { 1001,   1, NIL, '*', NIL } } , .F. } )
+   aAdd( aCommRules, { 'DO' , { {    1,   0, NIL, '<', NIL }, {    0,   0, '.', NIL, NIL }, {    0,   0, 'PRG', NIL, NIL } } , .F. } )
+   aAdd( aCommRules, { 'CD' , { {    1,   0, NIL, '(', NIL } } , .F. } )
+
+RETURN .T.
+
+//--------------------------------------------------------------//
+STATIC FUNCTION InitDotResults()
+
+   /* Defines Results*/
+
+   /* Translates Results*/
+   aAdd( aTransResults, { { {   0, '__GET( MEMVARBLOCK(' }, {   0,   2 }, {   0, '), ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ' )' } }, { -1,  1, -1,  1, -1,  1, -1,  1, -1,  1, -1} , { NIL, NIL, NIL, NIL, NIL }  } )
+   aAdd( aTransResults, { { {   0, '__GET(' }, {   0,   1 }, {   0, ')' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aTransResults, { { {   0, '__oGet := __GET(' }, {   0,   1 }, {   0, ') ; aAdd( GetList, __oGet ) ; __oGet:Display()' } }, { -1,  1, -1} , { NIL }  } )
+
+   /* Commands Results*/
+   aAdd( aCommResults, { { {   0, 'Scroll( 2, 0, MaxRow() - 1, MaxCol() ) ; SetPos( 2, 0 )' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, 'Browse( 1, 0, MaxRow() - 1, MaxCol() )' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, '__QUIT()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, '__SetIf( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, '__SetElseIf( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, '__SetElse()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, '__SetEnd()' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, '__SetEnd()' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, '__SetDoCase()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, '__SetCase( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  1, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, '__SetOtherwise()' } }, { -1} ,  } )
+   aAdd( aCommResults, { { {   0, '__SetEndCase()' } }, { -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'PP_Run( ' }, {   0,   1 }, {   0, ' + ".prg" )' } }, { -1,  2, -1} , { NIL }  } )
+   aAdd( aCommResults, { { {   0, 'DirChange( ' }, {   0,   1 }, {   0, ' )' } }, { -1,  4, -1} , { NIL }  } )
 
 RETURN .T.
 
@@ -8583,7 +9226,7 @@ PROCEDURE PP_RunInit( aProcedures, aInitExit, nLine )
 RETURN
 
 //--------------------------------------------------------------//
-FUNCTION PP_PreProText( sLines, asLines, bBlanks )
+FUNCTION PP_PreProText( sLines, asLines, bBlanks, bAutoCompile )
 
    LOCAL nOpen, nClose, sTemp := "", nLine, nLines
 
@@ -8593,6 +9236,12 @@ FUNCTION PP_PreProText( sLines, asLines, bBlanks )
 
    IF bBlanks == NIL
       bBlanks := .T.
+   ENDIF
+
+   IF bAutoCompile == NIL
+      bAutoCompile := bCompile
+   ELSE
+      bCompile := bAutoCompile
    ENDIF
 
    IF asLines == NIL
@@ -8617,8 +9266,8 @@ FUNCTION PP_PreProText( sLines, asLines, bBlanks )
 
    //ErrorBlock( {|oErr| RP_PPText_Err( oErr, SubStr( sLines, nClose + 1, nOpen - ( nClose + 1 ) ), 0 ) } )
 
-   WHILE ( nOpen := At( Chr(10), sLines, nOpen + 1 ) ) > 0
-      //TraceLog( nClose, nOpen )
+   WHILE ( nOpen := At( Chr(10), sLines, nOpen + 1 ) ) > 0 .AND. nOpen > nClose
+      //TraceLog( sLines, Len( sLines ), nOpen, nClose )
       aAdd( asLines, RTrim( LTrim( SubStr( sLines, nClose + 1, nOpen - ( nClose + 1 ) ) ) ) )
       //TraceLog( Len( asLines ), aTail( asLines ) )
       nClose := nOpen
@@ -8908,46 +9557,15 @@ PROCEDURE PP_LoadRun()
 RETURN
 
 //--------------------------------------------------------------//
+PROCEDURE PP_LoadDot()
 
-#ifdef __HARBOUR__
+   IF ! s_lDotLoaded
+      s_lDotLoaded := .T.
+      InitDotRules()
+      InitDotResults()
+   ENDIF
 
-   //--------------------------------------------------------------//
-   PROCEDURE PP_LoadClass()
-
-      IF ! s_lClsLoaded
-         s_lClsLoaded := .T.
-         InitClsRules()
-         InitClsResults()
-      ENDIF
-
-   RETURN
-
-   //--------------------------------------------------------------//
-   PROCEDURE PP_LoadFW()
-
-      IF ! s_lFWLoaded
-         s_lFWLoaded := .T.
-         InitFWRules()
-         InitFWResults()
-      ENDIF
-
-   RETURN
-
-   //--------------------------------------------------------------//
-   PROCEDURE PP_LoadMiniGUI()
-
-      IF ! s_lMiniGUILoaded
-         s_lMiniGUILoaded := .T.
-         InitMiniGUIRules()
-         InitMiniGUIResults()
-      ENDIF
-
-   RETURN
-
-   //--------------------------------------------------------------//
-   FUNCTION PP_CompileText( sLines )
-   RETURN PP_CompileLine( sLines )
-#endif
+RETURN
 
 //--------------------------------------------------------------//
 #ifdef __HARBOUR__

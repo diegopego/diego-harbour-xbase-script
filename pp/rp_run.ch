@@ -2,7 +2,7 @@
  * xBaseScript Project source code:
  * Pre-Processor / Dot prompt environment / Script Interpreter
  *
- * Copyright 2000-2001 Ron Pinkas <ronpinkas@profit-master.com>
+ * Copyright 2000-2001 Ron Pinkas <ron@profit-master.com>
  * www - http://www.xBaseScript.com
  *
  * This program is free software; you can redistribute it and/or modify
@@ -23,24 +23,26 @@
 
 #ifdef __HARBOUR__
    #ifdef WIN
-      #COMMAND Alert( <x> ) => MessageBox( 0, xToStr( <x> ), "xBaseScript for Windows", 0 )
+      #COMMAND Alert( <x> ) => MessageBox( 0, CStr( <x> ), "xBaseScript for Windows", 0 )
    #endif
 #else
    //#define __CLIPPER__
 #endif
 
+#TRANSLATE ... =>
+
 #TRANSLATE AS <type: ANYTYPE, ARRAY, CHARACTER, CODEBLOCK, DATE, LOGICAL, NUMERIC, OBJECT, STRING, USUAL> =>
 #TRANSLATE AS ARRAY OF <x> =>
 #TRANSLATE AS CLASS <!x!> =>
 #TRANSLATE AS CLASS <!x!> := => :=
-#COMMAND _HB_CLASS <*x*> =>
-#COMMAND _HB_MEMBER <*x*> =>
+#COMMAND _HB_CLASS <x> =>
+#COMMAND _HB_MEMBER <x> =>
 
 #XTRANSLATE QSelf() => PP_Qself()
 #XTRANSLATE AddMethod( <MethodName>, @<!FunName!>(), <n>, <l> ) => AddInLine( <MethodName>, {|Self,p1,p2,p3,p4,p5,p6,p7,p8,p9| PP_QSelf(Self), PP_ExecMethod( <"FunName">, p1,p2,p3,p4,p5,p6,p7,p8,p9 ) }, <n>, <l> )
 #TRANSLATE :: => Self:
 
-#COMMAND MEMVAR <*x*> =>
+#COMMAND MEMVAR [<x,...>] =>
 
 //#COMMAND BROWSE => Browse( 1, 0, MaxRow() - 1, MaxCol() )
 
@@ -50,7 +52,7 @@
 //#COMMAND EXTERNAL <!file1!> [, <!fileN!> ] => PP_ProcessFile( <file1> ) [; PP_ProcessFile( <fileN> ) ]
 #COMMAND EXTERNAL <!file1!> [, <fileN> ] =>
 
-#COMMAND DECLARE <!class!> <declaraion> <*x*> =>
+//#COMMAND DECLARE <!class!> <declaraion> [<x,...>] => [<-x->]
 
 // Must precede rule for DO CASE.
 #COMMAND DO <!proc!> => <proc>()
@@ -59,23 +61,23 @@
 #COMMAND IF <ifExp>         => PP__IF <ifExp>
 #COMMAND ELSEIF <elseifExp> => PP__ELSEIF <elseifExp>
 #COMMAND ELSE               => PP__ELSE
-#COMMAND ENDIF [<*x*>]      => PP__ENDIF
-#COMMAND END [<*x*>]        => PP__END
+#COMMAND ENDIF [<x,...>]    => PP__ENDIF [<-x->]
+#COMMAND END [<x,...>]      => PP__END [<-x->]
 
 #COMMAND DO CASE            => PP__DOCASE
 #COMMAND CASE <caseExp>     => PP__CASE <caseExp>
 #COMMAND OTHERWISE          => PP__OTHERWISE
-#COMMAND ENDCASE [<*x*>]    => PP__ENDCASE
+#COMMAND ENDCASE [<x,...>]  => PP__ENDCASE [<-x->]
 
 #COMMAND FOR <counter> := <start> TO <end> [STEP <step>] => PP__FOR <counter>:=<start>~TO~<end>~STEP~<step>
 #COMMAND FOR <counter> =  <start> TO <end> [STEP <step>] => PP__FOR <counter>:=<start>~TO~<end>~STEP~<step>
-#COMMAND LOOP [<*x*>]                                    => PP__LOOP
-#COMMAND EXIT [<*x*>]                                    => PP__EXIT
-#COMMAND NEXT [<*x*>]                                    => PP__NEXT
+#COMMAND LOOP [<x,...>]                                  => PP__LOOP [<-x->]
+#COMMAND EXIT [<x,...>]                                  => PP__EXIT [<-x->]
+#COMMAND NEXT [<x,...>]                                  => PP__NEXT [<-x->]
 
 #COMMAND DO WHILE <cond>                                 => PP__WHILE <cond>
 #COMMAND WHILE <cond>                                    => PP__WHILE <cond>
-#COMMAND ENDDO [<*x*>]                                   => PP__ENDDO
+#COMMAND ENDDO [<x,...>]                                 => PP__ENDDO [<-x->]
 
 #COMMAND DO <(file)>.prg => PP_Run( #<file> + ".prg" )
 
@@ -100,6 +102,8 @@
 #COMMAND PUBLIC <var,...>     => PP_Publics( { <"var"> } )
 #COMMAND LOCAL <var,...>      => PP_Locals( { <"var"> } )
 #COMMAND STATIC <var,...>     => PP_Statics( { <"var"> } )
+
+#COMMAND FIELD <var,...>      =>
 
 #TRANSLATE ProcName( [<n>] ) => PP_ProcName( <n> )
 #TRANSLATE ProcLine( [<n>] ) => PP_ProcLine( <n> )
