@@ -170,13 +170,13 @@ STATIC bDbgMatch := .F., bDbgExp := .F., bDbgPPO := .F., bLoadRules := .T., ;
 
 STATIC nIfDef := 0, abIfDef := {}, nIf := 0, abIf := {}
 
-STATIC hPP := NIL
+STATIC hPP
 
 STATIC s_asPaths := {}
 
 STATIC s_bArrayPrefix := .F.
 
-STATIC s_sFile := "", s_sIncludeFile := NIL
+STATIC s_sFile := "", s_sIncludeFile
 
 STATIC nRow, nCol
 
@@ -2146,9 +2146,10 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks )
    BEGIN SEQUENCE
 
    WHILE ( nLen := FRead( hSource, @sBuffer, PP_BUFFER_SIZE ) ) > 2
-
       nPosition := 1
       nMaxPos   := nLen - 1
+
+      //TraceLog( sLine, sBuffer )
 
       WHILE nPosition < nMaxPos
 
@@ -2338,14 +2339,10 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks )
                       EXIT
                    ENDIF
 
-                   IF nNewLine == 0
-                      sLine += SubStr( sBuffer, nPosition )
-                      TraceLog( sLine )
-                      //FSeek( hSource, -1, 1 )
-                      nLen := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
-                      IF nLen < 2
-                         BREAK 'ERROR! Unterminated ["]'
-                      ENDIF
+                   IF nClose == 0
+                      sTmp      := SubStr( sBuffer, nPosition )
+                      nLen      := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
+                      sBuffer   := sTmp + sBuffer
                       nMaxPos   := nLen - 1
                       nPosition := 1
                       LOOP
@@ -2365,13 +2362,10 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks )
                       EXIT
                    ENDIF
 
-                   IF nNewLine == 0
-                      sLine += SubStr( sBuffer, nPosition )
-                      //FSeek( hSource, -1, 1 )
-                      nLen := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
-                      IF nLen < 2
-                         BREAK "ERROR! Unterminated '''"
-                      ENDIF
+                   IF nClose == 0
+                      sTmp      := SubStr( sBuffer, nPosition )
+                      nLen      := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
+                      sBuffer   := sTmp + sBuffer
                       nMaxPos   := nLen - 1
                       nPosition := 1
                       LOOP
@@ -2396,22 +2390,19 @@ FUNCTION PP_PreProFile( sSource, sPPOExt, bBlanks )
                    IF nNewLine > 0 .AND. ( nClose == 0 .OR. nClose > nNewLine )
                       EXIT
                    ENDIF
-                   IF nNewLine == 0
-                      sTmp := SubStr( sBuffer, nPosition )
-                      //FSeek( hSource, -1, 1 )
-                      nLen := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
-                      sBuffer := sTmp + sBuffer
-                      IF nLen < 2
-                         EXIT
-                      ENDIF
-                      nMaxPos   := ( nLen - 1 ) + Len( sTmp )
+
+                   IF nClose == 0
+                      sTmp      := SubStr( sBuffer, nPosition )
+                      nLen      := FRead( hSource, @sBuffer, PP_BUFFER_SIZE )
+                      sBuffer   := sTmp + sBuffer
+                      nMaxPos   := nLen - 1
                       nPosition := 1
                       LOOP
+                   ELSE
+                      sLine     += SubStr( sBuffer, nPosition, nClose )
+                      nPosition += ( nClose )
+                      EXIT
                    ENDIF
-
-                   sLine     += SubStr( sBuffer, nPosition, nClose )
-                   nPosition += ( nClose )
-                   EXIT
                 ENDDO
                 IF nClose > 0 .AND. nClose < nNewLine
                    cChar := ']'
@@ -3388,7 +3379,7 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
 
          IF ( sAnchor == NIL .OR. sMultiStopper != NIL .OR. ;
               ( ( ( sToken := NextToken( @sWorkLine ) ) != NIL  .AND. ( DropTrailingWS( @sToken, @sPad ), nLen := Max( 4, Len( sToken ) ), Upper( sToken ) == Left( sAnchor, nLen ) ) ) ) ) ;
-            .AND. ( nMarkerId == 0 .OR. ( sAnchor == NIL .AND. sMultiStopper != NIL ) .OR. ( ( xMarker := NextExp( @sWorkLine, cType, aList, NIL, sNextAnchor, aRules[nRule][3] ) ) != NIL ) )
+            .AND. ( nMarkerId == 0 .OR. ( sAnchor == NIL .AND. sMultiStopper != NIL ) .OR. ( ( xMarker := NextExp( @sWorkLine, cType, aList, sNextAnchor, aRules[nRule][3] ) ) != NIL ) )
 
             IF sMultiStopper != NIL
                IF sAnchor == NIL
@@ -3514,11 +3505,11 @@ STATIC FUNCTION MatchRule( sKey, sLine, aRules, aResults, bStatement, bUpper )
 
                   WHILE nMatch > 1
                      nMatch--
-                     IF aRules[nRule][2][nMatch][2] >= 0 .AND. aRules[nRule][2][nMatch][2] < nOPtional
+                     IF /*aRules[nRule][2][nMatch][2] >= 0 .AND.*/ Abs( aRules[nRule][2][nMatch][2] ) < nOPtional
                         EXIT
                      ENDIF
                   ENDDO
-                  IF nMatch == 0 .OR. ( aRules[nRule][2][nMatch][2] >= 0 .AND. aRules[nRule][2][nMatch][2] < nOPtional )
+                  IF nMatch == 0 .OR. ( /*aRules[nRule][2][nMatch][2] >= 0 .AND.*/ Abs( aRules[nRule][2][nMatch][2] ) < nOPtional )
                      nMatch++
                   ENDIF
 
@@ -3842,6 +3833,8 @@ STATIC FUNCTION NextToken( sLine, lDontRecord )
    LOCAL s1, s2, s3
    LOCAL sDigits
 
+   //TRaceLog( sLine, lDontRecord )
+
    IF Empty( sLine )
       RETURN NIL
    ENDIF
@@ -4097,13 +4090,14 @@ RETURN sReturn
 
 //--------------------------------------------------------------//
 
-STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
+STATIC FUNCTION NextExp( sLine, cType, aWords, sNextAnchor, bX )
 
   LOCAL  sExp, sTemp, Counter, sPad, sToken, sList
   LOCAL  sNextLine, sNextToken, sLastToken, sJustToken, sJustNext, cLastChar
   LOCAL  s1, s2, s4, s5, sNext1, sNext2, sNext4, sNext5, nLen, nNextLen
-  LOCAL  sWorkLine, sPrimaryStopper, nStoppers, nStopper, sStopLine, sStopper, ;
-         sMultiStopper, nSpaceAt, sNextStopper, cChar
+  LOCAL  sWorkLine, sPrimaryStopper, nStoppers, nStopper, sStopLine, sStopper
+  LOCAL  sMultiStopper, nSpaceAt, sNextStopper, cChar
+  LOCAL  aExp
 
   IF Empty( sLine )
      RETURN NIL
@@ -4116,9 +4110,7 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
         /* No prep needed */
 
      CASE cType == 'A'
-        IF aExp == NIL
-           aExp := {}
-        ENDIF
+        aExp := {}
 
      CASE cType == ','
         sList := ""
@@ -4228,6 +4220,8 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
      IF sToken == NIL
         EXIT
      ENDIF
+
+     //TraceLog( sToken )
 
      sJustToken := RTrim( sToken )
      IF sNextAnchor != NIL  .AND. sJustToken == sNextAnchor
@@ -4346,9 +4340,9 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
               #endif
            ELSE
               //TraceLog( "Content from: " + sLine )
-              sTemp := NextExp( @sLine, ',', NIL, NIL, NIL ) // Content - Ignoring sNextAnchor !!!
+              sTemp := NextExp( @sLine, ',', NIL, NIL ) // Content - Ignoring sNextAnchor !!!
               IF sTemp == NIL
-                 TraceLog( "ERROR!(1) No content at: '" + sLine + "' After: " + sExp  )
+                 TraceLog( "ERROR!(1) No content at: '" + sLine + "' After: " + sExp, sLine  )
                  Alert( "ERROR!(1) No content at: '" + sLine + "' After: " + sExp  )
                  EXIT
               ELSE
@@ -4358,14 +4352,14 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
 
               sToken := NextToken( @sLine ) // Close
               IF sToken == NIL
-                 TraceLog( "ERROR!(2) Unbalanced '(' at: " + sExp )
+                 TraceLog( "ERROR!(2) Unbalanced '(' at: " + sExp, sLine )
                  Alert( "ERROR!(2) Unbalanced '(' at: " + sExp )
                  EXIT
               ELSEIF Left( sToken, 1 ) == ')'
                  sExp += sToken
               ELSE
                  sLine := sToken + sLine
-                 TraceLog( "ERROR!(3) Unbalanced '(' Found: '" +  sToken + "' at: " + sExp )
+                 TraceLog( "ERROR!(3) Unbalanced '(' Found: '" +  sToken + "' at: " + sExp, sLine )
                  Alert( "ERROR!(3) Unbalanced '(' Found: '" +  sToken + "' at: " + sExp )
                  EXIT
               ENDIF
@@ -4375,6 +4369,9 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
            // Continue  2nd level checks below.
         ELSEIF s1 == '{'
            sExp  += sToken
+
+         #ifdef EXPLICIT_BLOCK
+
            IF sNext1 == '|'
               /* Literal block */
               sExp           += sNextToken
@@ -4394,7 +4391,7 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
                     s_bArrayPrefix := .F.
                  #endif
               ELSE
-                 sTemp := NextExp( @sLine, ',', NIL, NIL, NIL ) // Content - Ignoring sNextAnchor !!!
+                 sTemp := NextExp( @sLine, ',', NIL, NIL ) // Content - Ignoring sNextAnchor !!!
                  IF sTemp == NIL
                     TraceLog( "ERROR! Unbalanced '{|...' at: " + sExp )
                     Alert( "ERROR! Unbalanced '{|...' at: " + sExp )
@@ -4415,13 +4412,13 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
                        s_bArrayPrefix := .F.
                     #endif
                  ELSE
-                    TraceLog( "ERROR! Unbalanced '{|...|' at: " + sExp )
+                    TraceLog( "ERROR! Unbalanced '{|...|' at: " + sExp, sNextToken, sNextLine )
                     Alert( "ERROR! Unbalanced '{|...|' at: " + sExp )
                     EXIT
                  ENDIF
               ENDIF
 
-              sTemp := NextExp( @sLine, ',', NIL, NIL, NIL ) // Content - Ignoring sNextAnchor !!!
+              sTemp := NextExp( @sLine, ',', NIL, NIL ) // Content - Ignoring sNextAnchor !!!
               IF sTemp == NIL
                  TraceLog( "ERROR! Empty '{||'" )
                  Alert( "ERROR! Empty '{||'" )
@@ -4444,6 +4441,9 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
                  EXIT
               ENDIF
            ELSE
+
+         #endif
+
               /* Literal array */
               IF sNext1 == '}'
                  sExp           += sNextToken
@@ -4454,7 +4454,7 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
                     s_bArrayPrefix := .T.
                  #endif
               ELSE
-                 sTemp := NextExp( @sLine, ',', NIL, NIL, NIL ) // Content - Ignoring sNextAnchor !!!
+                 sTemp := NextExp( @sLine, ',', NIL, NIL ) // Content - Ignoring sNextAnchor !!!
                  IF sTemp == NIL
                     TraceLog( "ERROR! Unbalanced '{...'", sLine )
                     Alert( "ERROR! Unbalanced '{...'" )
@@ -4477,13 +4477,16 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
                     EXIT
                  ENDIF
               ENDIF
+
+         #ifdef EXPLICIT_BLOCK
            ENDIF
+         #endif
 
            sLastToken := "}"
            // Continue  2nd level checks below.
         ELSEIF s1 == "["
            sExp  += sToken
-           sTemp := NextExp( @sLine, ',', NIL, NIL, NIL ) // Content - Ignoring sNextAnchor !!!
+           sTemp := NextExp( @sLine, ',', NIL, NIL ) // Content - Ignoring sNextAnchor !!!
            IF sTemp == NIL
               Alert( "ERROR! Unbalanced '[' at: " + sExp )
               EXIT
@@ -4687,6 +4690,17 @@ STATIC FUNCTION NextExp( sLine, cType, aWords, aExp, sNextAnchor, bX )
            #else
               s_bArrayPrefix := .F.
            #endif
+           LOOP
+        /* .NOT. is being translated to ! at NextToken() !!!
+        ELSEIF sNext5 == ".NOT."
+           sExp           += sNextToken
+           sLine          := sNextLine
+           s_bArrayPrefix := .F.
+           #ifdef __HARBOUR__
+              SetArrayPrefix( .F. )
+           #else
+              s_bArrayPrefix := .F.
+           #endif */
         ENDIF
 
      ENDIF
@@ -5156,13 +5170,14 @@ RETURN sResult
 
 STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
 
-   LOCAL nNext, sKey, sAnchor := NIL, nOptional := 0, cType := NIL, nId := 0, aRule := NIL, aMatch, aWords := NIL
+   LOCAL nNext, sKey, sAnchor, nOptional := 0, cType, nId := 0, aRule, aMatch, aWords
    LOCAL nOptionalAt, nMarkerAt, aMarkers := {}, Counter, nType, aResult := {}, sTemp, aModifiers, aValues
    LOCAL aRP, nAt, sResult, nCloseAt, sMarker, nCloseOptionalAt, sPad, nResults, nMarker, nMP, nMatches, nOffset
    LOCAL nWord, nWords, cChar
    LOCAL nLen, s1, s2, s3
    LOCAL sRuleCopy := sRule
    LOCAL nLastOptional, nPending
+
    /*
    nMarkerID
    nOPTIONAL
@@ -7473,7 +7488,7 @@ STATIC FUNCTION InitClsResults()
    aAdd( aTransResults, { { {   0, ':Super' } }, { -1} ,  } )
 
    /* Commands Results*/
-   aAdd( aCommResults, { { {   0, '_HB_CLASS ' }, {   0,   1 }, {   0, ' ; ' }, {   0,   6 }, {   0, ' function ' }, {   0,   1 }, {   0, '() ; static s_oClass ; local MetaClass,nScope := HB_OO_CLSTP_EXPORTED ; if s_oClass == NIL ; s_oClass := IIF(' }, {   0,   2 }, {   0, ', ' }, {   0,   2 }, {   0, ' ,TClass():new( ' }, {   0,   1 }, {   0, ' , __HB_CLS_PAR ( ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 }, {   0, ' ) ) ) ; #undef  _CLASS_NAME_ ; #define _CLASS_NAME_ ' }, {   0,   1 }, {   0, ' ; #undef  _CLASS_MODE_ ; #define _CLASS_MODE_ _CLASS_DECLARATION_ ; #xtranslate CLSMETH ' }, ;
+   aAdd( aCommResults, { { {   0, '_HB_CLASS ' }, {   0,   1 }, {   0, ' ; ' }, {   0,   6 }, {   0, ' function ' }, {   0,   1 }, {   0, '() ; static s_oClass ; local MetaClass,nScope := HB_OO_CLSTP_EXPORTED ; if s_oClass == NIL ; s_oClass := IIF(' }, {   0,   2 }, {   0, ', ' }, {   0,   2 }, {   0, ' ,HBClass():new( ' }, {   0,   1 }, {   0, ' , __HB_CLS_PAR ( ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 }, {   0, ' ) ) ) ; #undef  _CLASS_NAME_ ; #define _CLASS_NAME_ ' }, {   0,   1 }, {   0, ' ; #undef  _CLASS_MODE_ ; #define _CLASS_MODE_ _CLASS_DECLARATION_ ; #xtranslate CLSMETH ' }, ;
          {   0,   1 }, {   0, ' <MethodName> => @' }, {   0,   1 }, {   0, '_<MethodName> ; #xtranslate DECLCLASS ' }, {   0,   1 }, {   0, ' => ; ' }, {   5, ' ; #translate Super( ' }, {   5,   5 }, {   5, ' ) : => ::' }, {   5,   5 }, {   5, ': ' }, {   0, '' }, {   4, ' ; #translate Super( ' }, {   4,   4 }, {   4, ' ) : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate Super() : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate Super : => ::' }, {   4,   4 }, {   4, ': ' }, {   0, '' }, {   4, ' ; #translate ::Super : => ::' }, {   4,   4 }, {   4, ': ' }, ;
          {   0, '' }, {   4, ' ; REQUEST ' }, {   4,   4 }, {   0, '' }, {   5, ' ,' }, {   5,   5 } }, { -1,  1, -1,  1, -1,  1, -1,  6, -1,  4, -1,  4, -1,  4, -1, -1,  4, -1,  1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1,  1} , { NIL, NIL, NIL, NIL, NIL, NIL }  } )
    aAdd( aCommResults, { { {   0, '_HB_MEMBER {' }, {   2, 'AS ' }, {   2,   2 }, {   0, ' ' }, {   0,   1 }, {   0, '} ; s_oClass:AddMultiData( ' }, {   0,   2 }, {   0, ', ' }, {   0,   3 }, {   0, ', HBCLSCHOICE( ' }, {   0,   4 }, {   0, ', ' }, {   0,   5 }, {   0, ', ' }, {   0,   6 }, {   0, ' ) + iif( ' }, {   0,   7 }, {   0, ', HB_OO_CLSTP_READONLY, 0 ), {' }, {   0,   1 }, {   0, '}, __HB_CLS_NOINI, ' }, {   0,   8 }, {   0, ' )' } }, { -1, -1,  1, -1,  1, -1,  4, -1,  1, -1,  6, -1,  6, -1,  6, -1,  6, -1,  4, -1,  6, -1} , { NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL }  } )
@@ -7638,7 +7653,7 @@ RETURN ""
 //--------------------------------------------------------------//
 FUNCTION PP_QSelf( o )
 
-   STATIC s_oSelf := NIL
+   STATIC s_oSelf
    LOCAL  oPreset := s_oSelf
 
    IF ValType( o ) == 'O'
