@@ -1,3 +1,6 @@
+2003-11-03 10:10 UTC-0800 Ron Pinkas <ron@ronpinkas.com>
+  * Numerous improvements and few fixes - synched from xHarbour
+ 
 2002-08-23 18:46 UTC-0800 Ron Pinkas <ron@ronpinkas.com>
   * pp.prg
     * Moved new DO <proc> [WITH...] rules above DO CASE rule.
