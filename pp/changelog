@@ -1,3 +1,20 @@
+2002-01-20 08:25 UTC-0800 Ron Pinkas <ron@profit-master.com>
+  * pp.prg
+    * Many refinments to clone Clipper behaviour:
+      - Clipper allows any WS between any single character of Match and Result Patterns.
+      - Clipper allows NON Optional Marker to appear in a Repeat Result Group.
+      - Clipper will generate a Repeat Group N times based on the Marker with the
+        highest number of values (not based on 1st (root) Marker.
+    + Added support for -STRICT for cloning Clipper bug.
+    + Added support for a definition file following the -U switch.
+    + Added support for -H and --help (Thanks to Uri V. Hnkin)
+    + Added #ifdef __CLIP__ supporting Clip (Thanks to Uri V. Hnkin)
+    + Added support for exclusing inline C boost when compiled by Harbour
+      using -DNO_BOOST
+
+  * pp.txt
+    + Added description of added switches.
+
 2001-12-18 21:35 UTC-0800 Ron Pinkas <ron@profit-master.com>
 
   * pp.prg
