@@ -1,6 +1,6 @@
 #ifdef __HARBOUR__
    #ifdef WIN
-      #COMMAND Alert( <x> ) => MessageBox( 0, xToStr( <x> ), "TInterpreter for Windows", 0 )
+      #COMMAND Alert( <x> ) => MessageBox( 0, xToStr( <x> ), "xBaseScript for Windows", 0 )
    #endif
 #else
    //#define __CLIPPER__
@@ -8,26 +8,26 @@
 
 #TRANSLATE AS <type: ANYTYPE, ARRAY, CHARACTER, CODEBLOCK, DATE, LOGICAL, NUMERIC, OBJECT, STRING, USUAL> =>
 #TRANSLATE AS ARRAY OF <x> =>
-#TRANSLATE AS CLASS <x> =>
-#TRANSLATE AS CLASS <x> := => :=
+#TRANSLATE AS CLASS <!x!> =>
+#TRANSLATE AS CLASS <!x!> := => :=
 #COMMAND _HB_CLASS <*x*> =>
 #COMMAND _HB_MEMBER <*x*> =>
 
 #XTRANSLATE QSelf() => PP_Qself()
-#XTRANSLATE AddMethod( <MethodName>, @<FunName>(), <n> ) => AddInLine( <MethodName>, {|Self,p1,p2,p3,p4,p5,p6,p7,p8,p9| PP_QSelf(Self), PP_ExecMethod( <"FunName">, p1,p2,p3,p4,p5,p6,p7,p8,p9 ) }, <n> )
+#XTRANSLATE AddMethod( <MethodName>, @<!FunName!>(), <n>, <l> ) => AddInLine( <MethodName>, {|Self,p1,p2,p3,p4,p5,p6,p7,p8,p9| PP_QSelf(Self), PP_ExecMethod( <"FunName">, p1,p2,p3,p4,p5,p6,p7,p8,p9 ) }, <n>, <l> )
 #TRANSLATE :: => Self:
 
 #COMMAND MEMVAR <*x*> =>
 
 //#COMMAND BROWSE => Browse( 1, 0, MaxRow() - 1, MaxCol() )
 
-#TRANSLATE _GET_( <var>, <varname>, [<pic>], [<valid>], [<when>] ) => __GET( MEMVARBLOCK(<varname>), <varname>, <pic>, <valid>, <when> )
+#TRANSLATE _GET_( <var>, <!varname!>, [<pic>], [<valid>], [<when>] ) => __GET( MEMVARBLOCK(<varname>), <varname>, <pic>, <valid>, <when> )
 #TRANSLATE __GET( <parlist,...>):Display() => __GET(<parlist>)
 
-//#COMMAND EXTERNAL <file1> [, <fileN> ] => PP_ProcessFile( <file1> ) [; PP_ProcessFile( <fileN> ) ]
-#COMMAND EXTERNAL <file1> [, <fileN> ] =>
+//#COMMAND EXTERNAL <!file1!> [, <!fileN!> ] => PP_ProcessFile( <file1> ) [; PP_ProcessFile( <fileN> ) ]
+#COMMAND EXTERNAL <!file1!> [, <fileN> ] =>
 
-#COMMAND DECLARE <class> <declaraion> <*x*> =>
+#COMMAND DECLARE <!class!> <declaraion> <*x*> =>
 
 #COMMAND IF <ifExp>         => PP__IF <ifExp>
 #COMMAND ELSEIF <elseifExp> => PP__ELSEIF <elseifExp>
@@ -51,20 +51,20 @@
 #COMMAND ENDDO [<*x*>]                                   => PP__ENDDO
 
 
-#COMMAND DO <file>.prg => PP_Run( #<file> + ".prg" )
+#COMMAND DO <(file)>.prg => PP_Run( #<file> + ".prg" )
 
-#COMMAND INIT PROCEDURE <name>[()]            => PP_PROC_INIT <name>
-#COMMAND EXIT PROCEDURE <name>[()]            => PP_PROC_EXIT <name>
+#COMMAND INIT PROCEDURE <!name!>[()]            => PP_PROC_INIT <name>
+#COMMAND EXIT PROCEDURE <!name!>[()]            => PP_PROC_EXIT <name>
 
-#COMMAND STATIC PROCEDURE <name>[()]          => PP_PROC_PRG <name>
-#COMMAND STATIC FUNCTION <name>[()]           => PP_PROC_PRG <name>
-#COMMAND STATIC PROCEDURE <name>( <par,...> ) => PP_PROC_PRG <name> ; PP_LocalParams( { <"par"> } )
-#COMMAND STATIC FUNCTION <name>( <par,...> )  => PP_PROC_PRG <name> ; PP_LocalParams( { <"par"> } )
+#COMMAND STATIC PROCEDURE <!name!>( <par,...> ) => PP_PROC_PRG <name> ; PP_LocalParams( { <"par"> } )
+#COMMAND STATIC PROCEDURE <!name!>[()]          => PP_PROC_PRG <name>
+#COMMAND STATIC FUNCTION <!name!>( <par,...> )  => PP_PROC_PRG <name> ; PP_LocalParams( { <"par"> } )
+#COMMAND STATIC FUNCTION <!name!>[()]           => PP_PROC_PRG <name>
 
-#COMMAND PROCEDURE <name>[()]          => PP_PROC <name>
-#COMMAND FUNCTION <name>[()]           => PP_PROC <name>
-#COMMAND PROCEDURE <name>( <par,...> ) => PP_PROC <name> ; PP_LocalParams( { <"par"> } )
-#COMMAND FUNCTION <name>( <par,...> )  => PP_PROC <name> ; PP_LocalParams( { <"par"> } )
+#COMMAND PROCEDURE <!name!>( <par,...> ) => PP_PROC <name> ; PP_LocalParams( { <"par"> } )
+#COMMAND PROCEDURE <!name!>[()]          => PP_PROC <name>
+#COMMAND FUNCTION <!name!>( <par,...> )  => PP_PROC <name> ; PP_LocalParams( { <"par"> } )
+#COMMAND FUNCTION <!name!>[()]           => PP_PROC <name>
 
 #COMMAND RETURN [<retExp>]             => PP_SetReturn( <retExp> )
 

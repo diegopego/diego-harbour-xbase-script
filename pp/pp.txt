@@ -1,25 +1,32 @@
 PP has 3 personalities which are tied tightly together.
 
-1. What is supposed to be 100% Clipper compatible Pre-Processor. Executing
-   PP followed by a source file name  and the -P switch, will create
-   <filename.pp$> which is the equivalent of the Clipper <filename.ppo> file.
-   In this mode there are few optional switches.
+1. What is supposed to be 100% Clipper compatible Pre-Processor
+   (with some extensions).
+
+   Executing PP followed by a source file name  and the -P switch, will
+   create <filename.pp$> which is the equivalent of the Clipper
+   <filename.ppo> file.
+
+   In this mode these are the optional command line switches.
 
    PP filename[.ext] [-U][-DM][-DE][-DP][-CCH]
 
-     -U   = Don't load standard rules.
-     -DM  = Show tracing information into the Match Engine.
-     -DE  = Show tracing information into the Expression Scanner.
-     -DP  = Show tracing information into the Output Generator.
-     -CCH = Generate a .cch file (compiled command header).
+     -CCH   = Generate a .cch file (compiled command header).
+     -D<id> = #define <id>.
+     -D:M   = Show tracing information into the Match Engine.
+     -D:E   = Show tracing information into the Expression Scanner.
+     -D:P   = Show tracing information into the Output Generator.
+     -P     = Generate .pp$ pre-processed output file.
+     -U     = Don't load standard rules.
 
-2. DOT prompt, which suppose to allow most of Harbour syntax. Please
+2. DOT prompt, which suppose to allow most of Clipper syntax. Please
    report any syntax you expect to work, but is not supported.
 
    It does support IF [ELSE] [ELSEIF] ENDIF in DOT environment.
 
-   Executing PP with no source filename will start the DOT prompt mode. In
-   this mode you can execute a single line at a time, by typing the line
+   Executing PP with no source filename will start the DOT prompt mode.
+
+   In this mode you can execute a single line at a time, by typing the line
    and pressing the [Enter] key.
 
    Additionally you may type:
