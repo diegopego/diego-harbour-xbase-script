@@ -5177,7 +5177,7 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
    LOCAL nLen, s1, s2, s3
    LOCAL sRuleCopy := sRule
    LOCAL nLastOptional, nPending
-
+   LOCAL sDots
    /*
    nMarkerID
    nOPTIONAL
@@ -5400,19 +5400,39 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                ExtractLeadingWS( @sRule )
          ENDCASE
 
-         nCloseAt := At('>', sRule )
-         nNext := At( ",...>", sRule )
+         nCloseAt := At( '>', sRule )
+         nNext    := At( ',', sRule )
 
-         IF nNext > 0 .AND. nNext < nCloseAt
+         IF nNext > 1 .AND. nNext < nCloseAt
+            sDots := LTrim( SubStr( sRule, nNext + 1 ) )
+            IF Left( sDots, 1 ) == '.'
+               sDots := LTrim( SubStr( sDots, 2 ) )
+               IF Left( sDots, 1 ) == '.'
+                  sDots := LTrim( SubStr( sDots, 2 ) )
+                  IF Left( sDots, 1 ) == '.'
+                     sDots := LTrim( SubStr( sDots, 2 ) )
+                     IF Left( sDots, 1 ) != '>'
+                        nNext := 0
+                     ENDIF
+                  ELSE
+                     nNext := 0
+                  ENDIF
+               ELSE
+                  nNext := 0
+               ENDIF
+            ELSE
+               nNext := 0
+            ENDIF
+         ENDIF
+
+         IF nNext > 1 .AND. nNext < nCloseAt
             //? "Extended: '" + sRule + "'"
             cType := 'A'
 
             sMarker := Left( sRule, nNext - 1 )
             ExtractLeadingWS( @sMarker )
             aAdd( aMarkers, sMarker )
-
-            sRule := SubStr( sRule, nNext + 4 )
-            ExtractLeadingWS( @sRule )
+            sRule := sDots
 
             nNext    := 0
             nCloseAt := 1
@@ -5447,7 +5467,7 @@ STATIC FUNCTION CompileRule( sRule, aRules, aResults, bX, bUpper )
                      aAdd( aWords, Upper( RTrim( Left( sRule, nCloseAt - 1 ) ) ) )
                      EXIT
                   ELSE
-                     Alert( "ERROR! Unblanced MP: ''<,...' at: " + sRule )
+                     Alert( "ERROR! Unblanced MP: ''<:' at: " + sRule )
                      RETURN .F.
                   ENDIF
                ENDIF
@@ -6338,6 +6358,41 @@ RETURN Len( aDefRules )
 
 FUNCTION ExtractLeadingWS( sLine, sWS )
 
+  #ifdef __HARBOUR__
+
+   HB_INLINE( @sLine, @sWs )
+   {
+      PHB_ITEM pItem1 = hb_itemUnRef( hb_stackItemFromBase( 1 ) );
+      PHB_ITEM pItem2 = hb_itemUnRef( hb_stackItemFromBase( 2 ) );
+      size_t iLen = pItem1->item.asString.length, i = 0;
+      void *pTmp;
+
+      while( pItem1->item.asString.value[i] == ' ' )
+      {
+         i++;
+      }
+
+      if( i > 0 )
+      {
+         pItem1->item.asString.length = iLen - i;
+         pTmp = (void *) pItem1->item.asString.value;
+         pItem1->item.asString.value = hb_strdup( pItem1->item.asString.value + i ) ;
+         hb_xfree( pTmp );
+      }
+
+      if( pItem2 )
+      {
+         hb_itemClear( pItem2 );
+         pItem2->type = HB_IT_STRING;
+         pItem2->item.asString.length = i;
+         pItem2->item.asString.value = ( char * ) hb_xgrab( pItem2->item.asString.length + 1 );
+         memset( pItem2->item.asString.value, ' ', pItem2->item.asString.length );
+         pItem2->item.asString.value[ pItem2->item.asString.length ] = '\0';
+      }
+   }
+
+  #else
+
    LOCAL Counter, cChar, nLen := Len( sLine )
 
    //? "Removing Leading: '" + sLine + "'"
@@ -6356,7 +6411,9 @@ FUNCTION ExtractLeadingWS( sLine, sWS )
       sLine := SubStr( sLine, Counter )
    ENDIF
 
-   //? "Removed: '" + sWs + "' Returning: " + sLine
+  #endif
+
+   //? "Removed: '" + sWs + "' sLine: " + sLine
 
 RETURN sWS
 
@@ -6392,7 +6449,6 @@ FUNCTION DropTrailingWS( sLine, sWS )
          memset( pItem2->item.asString.value, ' ', pItem2->item.asString.length );
          pItem2->item.asString.value[ pItem2->item.asString.length ] = '\0';
       }
-
    }
 
   #else
@@ -6412,9 +6468,9 @@ FUNCTION DropTrailingWS( sLine, sWS )
    sLine := Left( sLine, nLen )
    sWS   := Space( nLenSource - nLen )
 
-   //? "After Drop: '" + sLine + "'"
-
   #endif
+
+   //? "After Drop: '" + sLine + "'"
 
 RETURN sLine
 

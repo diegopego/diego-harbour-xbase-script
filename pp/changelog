@@ -1,3 +1,10 @@
+2001-12-18 21:35 UTC-0800 Ron Pinkas <ron@profit-master.com>
+
+  * pp.prg
+    * Corrected CompileRule() to support spaces in <x,...> match pattern.
+    /* Clipper allows any number of spaces anywhere, even between the dots!
+    ! Optimized ExtractLeadingWS() by adding INLINE C version.
+     
 2001-09-08 21:35 UTC-0800 Ron Pinkas <ron@profit-master.com>
 
   + changelog
