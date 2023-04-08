@@ -1,8 +1,8 @@
 # xbase-script
 
 xBaseScript is an xBase language (dBase/FoxPro/Clipper/[x]Harbour Interpreter, 
-implemenmted in the Clipper/Harbour/xHarbour dialects, implementing a complete
-Clipper Pre-Processor (supporting the [x]Harbour extensions).
+implemenmted in the Clipper/Harbour/xHarbour dialects - including a complete
+Clipper Pre-Processor (supporting the [x]Harbour extensions.
 
 The implementation is mostly contained in a single PRG source file (pp.prg - 
 as it started as a Pre-Processor implementation and later grew to a full interpreter
